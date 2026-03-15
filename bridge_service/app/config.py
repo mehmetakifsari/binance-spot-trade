@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     binance_stream: str = "wss://stream.binance.com:9443/ws/btcusdt@trade"
-    n8n_webhook_url: str
+    n8n_webhook_url: str = ""
     bridge_http_port: int = 8001
 
 
