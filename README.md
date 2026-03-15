@@ -43,6 +43,9 @@ See [docs/architecture.md](docs/architecture.md) and [docs/coolify-deployment.md
 │   └── requirements.txt
 ├── migrations/
 │   └── 001_init.sql           # Initial PostgreSQL schema
+├── frontend/                  # Nginx reverse proxy for trade.visupanel.com
+│   ├── Dockerfile
+│   └── nginx.conf.template
 ├── docs/
 │   ├── architecture.md
 │   ├── schema.md
@@ -79,9 +82,10 @@ cd backend && pip install -r requirements.txt && pytest
 
 5. Check health:
 
+- Frontend (proxy) health: `http://localhost:8080/healthz`
+- Frontend dashboard URL: `http://localhost:8080/dashboard`
+- Backend health: `http://localhost:8000/api/health`
 - Bridge health (internal in Docker network): `http://bridge:8001/health`
-- Backend health: `http://localhost:8000/health`
-- Dashboard: `http://localhost:8000/dashboard`
 
 ## Core Trading Rules (Deterministic)
 
