@@ -87,6 +87,23 @@ cd backend && pip install -r requirements.txt && pytest
 - Backend health: `http://localhost:8000/api/health`
 - Bridge health (internal in Docker network): `http://bridge:8001/health`
 
+## Troubleshooting
+
+### Nginx startup `notice` logs are expected
+
+If you see logs similar to the following when starting `frontend`:
+
+- `using the "epoll" event method`
+- `nginx/1.27.5`
+- `start worker processes`
+
+those are normal Nginx informational startup messages (log level `notice`), not runtime errors.
+
+To confirm the proxy is healthy, check:
+
+- `http://localhost:8080/healthz`
+- `docker compose ps frontend`
+
 ## Core Trading Rules (Deterministic)
 
 - Buy after bearish block analysis + rebound confirmation
@@ -114,4 +131,3 @@ The backend keeps trade decisions deterministic and rule-based. Any AI service c
 - Add auth for dashboard endpoints
 - Add background scheduler for end-of-day / weekly / monthly report jobs
 - Add integration tests for state transitions and PnL calculations
-
