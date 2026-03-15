@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Awaitable
+from typing import Awaitable, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -59,6 +59,24 @@ class SignalPayload(BaseModel):
     is_bearish: bool = False
     is_bullish: bool = False
     panic_score: float = 0.0
+
+
+def _parse_signal_payload(raw_payload: Any) -> SignalPayload:
+    if isinstance(raw_payload, list):
+        if len(raw_payload) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="Signal payload array must contain exactly one item.",
+            )
+        raw_payload = raw_payload[0]
+
+    if not isinstance(raw_payload, dict):
+        raise HTTPException(status_code=422, detail="Signal payload must be a JSON object.")
+
+    try:
+        return SignalPayload.model_validate(raw_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid signal payload: {exc}") from exc
 
 
 def _fetch_or_init_state(db, symbol: str) -> dict:
@@ -142,7 +160,8 @@ async def health(request: Request) -> dict:
 
 @app.post("/signals")
 @app.post("/api/signals")
-async def process_signal(payload: SignalPayload) -> dict:
+async def process_signal(request: Request) -> dict:
+    payload = _parse_signal_payload(await request.json())
     db = SessionLocal()
     try:
         state = _fetch_or_init_state(db, payload.symbol)
@@ -249,6 +268,22 @@ async def process_signal(payload: SignalPayload) -> dict:
         raise
     finally:
         db.close()
+
+
+@app.get("/signals")
+@app.get("/api/signals")
+async def signal_endpoint_help() -> dict:
+    return {
+        "detail": "Use POST /api/signals with JSON body.",
+        "example": {
+            "symbol": "BTCUSDT",
+            "price": 72021.01,
+            "rsi": 65.19,
+            "is_bearish": False,
+            "is_bullish": True,
+            "panic_score": 0,
+        },
+    }
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
