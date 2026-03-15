@@ -24,7 +24,7 @@ Bu proje Coolify üzerinde iki ana domain ile çalışacak şekilde tasarlanmı�
 Bu repoda `frontend/` altında nginx reverse proxy eklidir ve `trade.visupanel.com` için önerilen kurulum budur.
 
 - Domain: `trade.visupanel.com`
-- Port: `8080`
+- Port: `80`
 - Healthcheck: `/healthz`
 - Runtime env: `BACKEND_ORIGIN=http://backend-service:8000` (Coolify internal URL)
 

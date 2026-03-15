@@ -39,7 +39,7 @@ services:
     environment:
       BACKEND_ORIGIN: http://backend:8000
     ports:
-      - "8080:8080"
+      - "8080:80"
 
 volumes:
   postgres_data:
