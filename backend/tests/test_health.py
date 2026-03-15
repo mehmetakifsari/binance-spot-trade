@@ -1,5 +1,6 @@
 from fastapi import HTTPException
 
+from app import main
 from app.main import _effective_base_url, _is_localhost_url, _parse_signal_payload
 
 
@@ -46,3 +47,11 @@ def test_parse_signal_payload_rejects_multi_item_array():
         assert "exactly one" in str(exc.detail)
     else:
         raise AssertionError("Expected HTTPException for invalid signal array")
+
+
+def test_upsert_admin_user_handles_mongo_failures(monkeypatch):
+    def fail_sync():
+        raise RuntimeError("mongo down")
+
+    monkeypatch.setattr(main, "_sync_admin_hash_mongodb", fail_sync)
+    main._upsert_admin_user()

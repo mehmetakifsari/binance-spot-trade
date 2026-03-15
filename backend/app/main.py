@@ -176,7 +176,10 @@ def _require_admin(request: Request) -> None:
 
 
 def _upsert_admin_user() -> None:
-    _sync_admin_hash_mongodb()
+    try:
+        _sync_admin_hash_mongodb()
+    except Exception as exc:
+        logger.warning("Initial Mongo admin sync failed: %s", exc)
 
 
 async def _admin_hash_sync_loop() -> None:
