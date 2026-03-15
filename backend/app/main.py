@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 
 from .config import settings
@@ -217,9 +218,14 @@ async def process_signal(payload: SignalPayload) -> dict:
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     db = SessionLocal()
-    row = db.execute(text("SELECT * FROM bot_state ORDER BY updated_at DESC LIMIT 1")).mappings().first()
-    latest = db.execute(text("SELECT * FROM balance_snapshots ORDER BY snapshot_time DESC LIMIT 1")).mappings().first()
-    db.close()
+    try:
+        row = db.execute(text("SELECT * FROM bot_state ORDER BY updated_at DESC LIMIT 1")).mappings().first()
+        latest = db.execute(text("SELECT * FROM balance_snapshots ORDER BY snapshot_time DESC LIMIT 1")).mappings().first()
+    except SQLAlchemyError:
+        row = None
+        latest = None
+    finally:
+        db.close()
     equity = float(latest["equity_usdt"]) if latest else settings.starting_balance_usdt
     active_qty = float(row["asset_qty"]) if row else 0.0
     mark_price = float(row["latest_price"]) if row else 0.0
@@ -240,16 +246,24 @@ async def dashboard(request: Request):
 @app.get("/trades", response_class=HTMLResponse)
 async def trades_page(request: Request):
     db = SessionLocal()
-    trades = db.execute(text("SELECT * FROM trades ORDER BY created_at DESC LIMIT 200")).mappings().all()
-    db.close()
+    try:
+        trades = db.execute(text("SELECT * FROM trades ORDER BY created_at DESC LIMIT 200")).mappings().all()
+    except SQLAlchemyError:
+        trades = []
+    finally:
+        db.close()
     return templates.TemplateResponse("trades.html", {"request": request, "trades": trades})
 
 
 @app.get("/reports", response_class=HTMLResponse)
 async def reports_page(request: Request):
     db = SessionLocal()
-    latest = db.execute(text("SELECT * FROM balance_snapshots ORDER BY snapshot_time DESC LIMIT 1")).mappings().first()
-    db.close()
+    try:
+        latest = db.execute(text("SELECT * FROM balance_snapshots ORDER BY snapshot_time DESC LIMIT 1")).mappings().first()
+    except SQLAlchemyError:
+        latest = None
+    finally:
+        db.close()
     equity = float(latest["equity_usdt"]) if latest else settings.starting_balance_usdt
     summary = format_summary(settings.starting_balance_usdt, equity, equity - settings.starting_balance_usdt, 0.0)
     return templates.TemplateResponse("reports.html", {"request": request, "summary": summary})
@@ -258,6 +272,10 @@ async def reports_page(request: Request):
 @app.get("/state-monitor", response_class=HTMLResponse)
 async def state_monitor(request: Request):
     db = SessionLocal()
-    states = db.execute(text("SELECT symbol, state, latest_rsi, drop_blocks, rise_blocks, cooldown_until, panic_mode FROM bot_state ORDER BY symbol")).mappings().all()
-    db.close()
+    try:
+        states = db.execute(text("SELECT symbol, state, latest_rsi, drop_blocks, rise_blocks, cooldown_until, panic_mode FROM bot_state ORDER BY symbol")).mappings().all()
+    except SQLAlchemyError:
+        states = []
+    finally:
+        db.close()
     return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc)})
