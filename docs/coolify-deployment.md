@@ -36,6 +36,10 @@ Proxy davranışı:
 
 ## Environment variables
 
+> Önemli: Bu backend **MongoDB kullanmaz**, PostgreSQL kullanır.
+> `backend/app/db.py` içinde SQLAlchemy bağlantısı `postgresql+psycopg2` olarak sabittir.
+> Coolify'de MongoDB resource eklemiş olsan bile bu servis için `DB_*` değerleri PostgreSQL'e işaret etmelidir.
+
 Required:
 - `BINANCE_STREAM`
 - `DB_HOST`
@@ -49,6 +53,27 @@ Required:
 - `FRONTEND_BASE_URL`
 - `BACKEND_BASE_URL`
 - `CORS_ALLOWED_ORIGINS`
+
+### Coolify'de DB kullanıcı/şifreyi otomatik yönetme (önerilen)
+
+Amaç: `DB_NAME`, `DB_USER`, `DB_PASSWORD` gibi alanları elle her deploy'da yazmamak.
+
+1. Coolify içinde önce bir **PostgreSQL managed database/resource** oluştur.
+2. `backend-service` ayarlarında bu DB resource'u **service relationship / connect / use from service** ile bağla.
+3. Backend env tarafında `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` değerlerini:
+   - ya doğrudan DB resource'dan otomatik gelen değişkenlere referans vererek,
+   - ya da Coolify'nin "Copy from resource" seçeneği ile doldurarak kullan.
+4. Bu alanları `Lock` ederek yanlışlıkla manuel override edilmesini engelle.
+
+Pratik kural:
+- Uygulama kodu sadece `DB_*` okur.
+- Secret üretimi/rotasyonu Coolify DB resource tarafında yapılır.
+- Backend tarafında sadece mapping (bağlama) tutulur.
+
+### Neden health endpoint yeşilken `/api/signals` 500 olabilir?
+
+`/api/health` yalnızca servis ayağa kalktığını gösterir. `POST /api/signals` ise aktif DB yazma/okuma yapar.
+Bu yüzden DB env yanlışsa veya migration eksikse health başarılı olsa bile signal endpoint 500 dönebilir.
 
 Optional:
 - `N8N_WEBHOOK_URL` (unset ise bridge worker pasif başlar, servis yine ayağa kalkar)
