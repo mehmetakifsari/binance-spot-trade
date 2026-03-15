@@ -184,6 +184,8 @@ Beklenen alanlar:
 `Fetch Binance Klines` çıktısı, tek bir item içinde **array (liste)** döndürür.
 Bu yüzden Code node'da örnek gelen `item.json.myNewField = 1` şablonu bu akışta doğrudan çalışmaz.
 
+> Kritik: n8n bazen node dili değişince varsayılan örnek kodu geri yazar. `Build Signal Payload` içinde `myNewField` görüyorsan kod resetlenmiştir; tüm kodu silip bu dokümandaki örneği **tamamını** yapıştır.
+
 #### Hata 1: JavaScript'te `A 'json' property isn't an object`
 
 Bu hata, output'ta `json` alanına object yerine array bırakıldığında oluşur.
