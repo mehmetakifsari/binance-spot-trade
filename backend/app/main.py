@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
+from typing import Awaitable
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +31,14 @@ app.add_middleware(
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
+logger = logging.getLogger(__name__)
+
+
+async def _safe_notify(event: str, notify_call: Awaitable[None]) -> None:
+    try:
+        await notify_call
+    except Exception as exc:
+        logger.warning("Telegram notify failed for %s: %s", event, exc)
 
 
 def _is_localhost_url(value: str) -> bool:
@@ -156,12 +166,18 @@ async def process_signal(payload: SignalPayload) -> dict:
             buy_notional = settings.panic_buy_usdt if decision.panic_mode else settings.normal_buy_usdt
             balance, qty = execute_buy(balance, payload.price, buy_notional)
             trade_result = {"side": "BUY", "qty": qty, "notional": buy_notional}
-            await notifier.send_trade("BUY", payload.symbol, qty, payload.price, decision.reason)
+            await _safe_notify(
+                "trade-buy",
+                notifier.send_trade("BUY", payload.symbol, qty, payload.price, decision.reason),
+            )
         elif decision.action == "SELL":
             if balance.asset_qty > 0:
                 balance, qty, proceeds = execute_sell(balance, payload.price)
                 trade_result = {"side": "SELL", "qty": qty, "notional": proceeds}
-                await notifier.send_trade("SELL", payload.symbol, qty, payload.price, decision.reason)
+                await _safe_notify(
+                    "trade-sell",
+                    notifier.send_trade("SELL", payload.symbol, qty, payload.price, decision.reason),
+                )
             else:
                 decision.action = "HOLD"
                 decision.reason = "Sell signal ignored: no active position"
@@ -229,7 +245,7 @@ async def process_signal(payload: SignalPayload) -> dict:
         return {"action": decision.action, "reason": decision.reason, "state": decision.new_state.value, "equity": equity}
     except Exception as exc:
         db.rollback()
-        await notifier.send_error(str(exc))
+        await _safe_notify("process-signal-error", notifier.send_error(str(exc)))
         raise
     finally:
         db.close()
