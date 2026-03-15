@@ -7,17 +7,26 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header>
-    <h1>VisuTrade Paper Signal Engine</h1>
-    <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/trades">Trades</a>
-      <a href="/reports">Reports</a>
-      <a href="/state-monitor">State Monitor</a>
-    </nav>
-  </header>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+  <div class="app-layout">
+    <input type="checkbox" id="menu-toggle" class="menu-toggle" />
+    <label for="menu-toggle" class="mobile-menu-button" aria-label="Menüyü aç/kapat">☰</label>
+
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>VisuTrade</h1>
+        <p>Paper Signal Engine</p>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/trades">Trades</a>
+        <a href="/reports">Reports</a>
+        <a href="/state-monitor">State Monitor</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </body>
 </html>
