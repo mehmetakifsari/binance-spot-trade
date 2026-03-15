@@ -560,6 +560,9 @@ async def dashboard(request: Request):
 
 @app.get("/trades", response_class=HTMLResponse)
 async def trades_page(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/login", status_code=302)
+
     db = SessionLocal()
     try:
         trades = db.execute(text("SELECT * FROM trades ORDER BY created_at DESC LIMIT 200")).mappings().all()
@@ -572,6 +575,9 @@ async def trades_page(request: Request):
 
 @app.get("/reports", response_class=HTMLResponse)
 async def reports_page(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/login", status_code=302)
+
     db = SessionLocal()
     try:
         latest = db.execute(text("SELECT * FROM balance_snapshots ORDER BY snapshot_time DESC LIMIT 1")).mappings().first()
@@ -586,6 +592,9 @@ async def reports_page(request: Request):
 
 @app.get("/state-monitor", response_class=HTMLResponse)
 async def state_monitor(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/login", status_code=302)
+
     db = SessionLocal()
     try:
         states = db.execute(text("SELECT symbol, state, latest_rsi, drop_blocks, rise_blocks, cooldown_until, panic_mode FROM bot_state ORDER BY symbol")).mappings().all()
