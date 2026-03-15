@@ -78,6 +78,25 @@ Import sonrası yapılacaklar:
 
 ## 5) Önerilen Coolify Env Değerleri
 
+
+## 5.1) Coolify'de **bridge-service / N8N_WEBHOOK_URL** alanına ne yazılmalı?
+
+Bridge servisi tarafında girmen gereken değer **n8n Webhook node'unun Production URL'i** olmalı.
+
+Doğru format:
+
+- `https://<n8n-domain>/webhook/visutrade-signal`
+
+Örnek:
+
+- `https://n8n.visupanel.com/webhook/visutrade-signal`
+
+> Notlar:
+> - `.../webhook-test/...` adresi sadece n8n editörde test içindir; bridge için production'da bunu kullanma.
+> - Path, workflow'daki Webhook node path'i ile aynı olmalı (`visutrade-signal`).
+> - Workflow **Active** değilse production webhook 404/401 dönebilir.
+
+
 ### bridge-service
 
 - `BINANCE_STREAM=wss://stream.binance.com:9443/ws/btcusdt@trade`
@@ -97,6 +116,65 @@ Import sonrası yapılacaklar:
 4. backend log'unda `/api/signals` 200 dönmeli.
 5. Dashboard tarafında state ve equity güncellenmeli.
 
+### 6.1) n8n tarafında hızlı smoke test (bridge olmadan)
+
+Önce workflow logic'in çalıştığını doğrulamak için bridge'i beklemeden Webhook node'unu test et:
+
+1. n8n editörde workflow'u aç.
+2. **Webhook Trigger** node'una girip **Listen for test event** başlat.
+3. Aşağıdaki örnek payload'ı **test URL**'e gönder:
+
+```bash
+curl -X POST 'https://<n8n-domain>/webhook-test/visutrade-signal' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source": "binance_ws",
+    "stream": "wss://stream.binance.com:9443/ws/btcusdt@trade",
+    "received_at": "2026-01-01T10:00:00Z",
+    "data": {
+      "e": "trade",
+      "E": 1735725600000,
+      "s": "BTCUSDT",
+      "p": "43000.12"
+    }
+  }'
+```
+
+Beklenen sonuç:
+
+- `Normalize Binance Event` node'unda `symbol` ve `price` dolu olmalı.
+- `Build Signal Payload` node'unda `rsi`, `is_bearish`, `is_bullish`, `panic_score` oluşmalı.
+- `POST Backend /api/signals` node'unda HTTP `200` dönmeli.
+
+> Not: `webhook-test` URL sadece editor test modunda çalışır. Bridge service production'da bunu kullanmaz.
+
+### 6.2) end-to-end test (bridge + production webhook)
+
+Smoke test sonrası production davranışı için:
+
+1. Workflow'u **Active** yap.
+2. `bridge-service` env'de `N8N_WEBHOOK_URL=https://<n8n-domain>/webhook/visutrade-signal` olduğundan emin ol.
+3. Bridge servisini redeploy/restart et.
+4. Bridge health kontrolü:
+
+```bash
+curl -s 'https://<bridge-domain>/health'
+```
+
+Beklenen alanlar:
+
+- `configured: true`
+- `running: true`
+- kısa süre sonra `last_message_at` dolu
+
+5. n8n executions ekranında yeni production execution'ları gör.
+
+### 6.3) En sık test hataları
+
+- **404 on webhook**: workflow active değil veya path yanlış (`visutrade-signal` olmalı).
+- **422 from backend**: n8n payload alanları backend modeli ile uyuşmuyor.
+- **No executions**: bridge tarafında `N8N_WEBHOOK_URL` yanlış/boş veya bridge redeploy edilmemiş.
+
 ## 7) Olası Sorunlar
 
 - **Bridge configured=false**
@@ -107,4 +185,29 @@ Import sonrası yapılacaklar:
   - n8n payload alan isimleri backend model ile uyuşmuyor.
 - **RSI hep 50**
   - Yeni boot sonrası yeterli price history birikmemiş olabilir.
+
+
+## 8) Opsiyonel: n8n içinde Cron ile test akışı (bridge'e dokunmadan)
+
+Evet, test için n8n tarafına ayrı bir **Cron workflow** ekleyebilirsin. Bu yöntem üretim akışını bozmaz:
+
+- Üretim: `bridge-service -> /webhook/visutrade-signal` (aynı kalır)
+- Test: `Schedule Trigger -> Binance REST ticker -> /api/signals`
+
+Bu repo içinde import edilebilir test workflow dosyası:
+
+- `docs/n8n-workflow.cron-test.visutrade.json`
+
+### Ne yapar?
+
+1. Her 1 dakikada tetiklenir (`Schedule Trigger`).
+2. Binance REST'ten anlık fiyat çeker (`/api/v3/ticker/price?symbol=BTCUSDT`).
+3. n8n static data ile RSI + flag hesaplar.
+4. Backend `POST /api/signals` endpoint'ine yollar.
+
+### Kullanım önerisi
+
+- Bu cron workflow'u **sadece staging/test** ortamında aktif et.
+- Aynı anda hem bridge webhook akışı hem cron test akışı açıksa backend'e daha sık sinyal gider.
+- Test bitince cron workflow'u durdur.
 

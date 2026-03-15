@@ -65,10 +65,15 @@ Optional:
 
 Detaylı workflow kurulumu ve import edilebilir örnek için: [docs/n8n-workflow.md](n8n-workflow.md).
 
+Bridge service env içinde `N8N_WEBHOOK_URL` değeri olarak n8n Webhook Trigger'ın production URL'ini girin (ör. `https://n8n.visupanel.com/webhook/visutrade-signal`).
+
+Staging/test sırasında önce n8n `webhook-test` endpointi ile smoke test yapıp ardından workflow'u `Active` alarak production webhook (`/webhook/visutrade-signal`) testine geçin.
+
 ## Service relationships
 
 - Bridge -> n8n webhook
 - n8n -> backend `/api/signals`
+- Test amaçlı opsiyonel n8n cron akışı (`docs/n8n-workflow.cron-test.visutrade.json`) sadece staging'de aktif edilmeli.
 - Backend -> PostgreSQL
 - Backend -> Telegram Bot API
 
