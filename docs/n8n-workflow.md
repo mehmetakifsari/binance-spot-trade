@@ -53,7 +53,7 @@ Bridge tarafı event'i n8n'e şu envelope ile gönderir:
 
 4. **HTTP Request (Send Signal to Backend)**
    - Method: `POST`
-   - URL: `{{$env.BACKEND_SIGNAL_URL || 'https://api-trade.visupanel.com/api/signals'}}`
+   - URL: `https://api-trade.visupanel.com/api/signals`
    - Body JSON:
      - `symbol`
      - `price`
@@ -61,6 +61,10 @@ Bridge tarafı event'i n8n'e şu envelope ile gönderir:
      - `is_bearish`
      - `is_bullish`
      - `panic_score`
+
+> Not: Bazı n8n kurulumlarında node expression içinde `{{$env.*}}` kullanımı güvenlik nedeniyle kapalıdır ve
+> `access to env vars denied` hatası verir. Bu repo içindeki import workflow'ları bu nedenle sabit URL ile gelir.
+> URL değiştirmek için HTTP Request node içindeki `URL` alanını doğrudan düzenle.
 
 ## 4) Import Edilebilir Workflow
 
@@ -210,4 +214,3 @@ Bu repo içinde import edilebilir test workflow dosyası:
 - Bu cron workflow'u **sadece staging/test** ortamında aktif et.
 - Aynı anda hem bridge webhook akışı hem cron test akışı açıksa backend'e daha sık sinyal gider.
 - Test bitince cron workflow'u durdur.
-

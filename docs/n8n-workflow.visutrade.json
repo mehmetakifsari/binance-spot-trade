@@ -49,7 +49,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.BACKEND_SIGNAL_URL || 'https://api-trade.visupanel.com/api/signals'}}",
+        "url": "https://api-trade.visupanel.com/api/signals",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
