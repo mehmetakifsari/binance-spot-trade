@@ -101,12 +101,18 @@ def _update_position_snapshot(db, symbol: str, price: float, cash: float, asset_
 
 @app.get("/health")
 @app.get("/api/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
+    request_base_url = str(request.base_url).rstrip("/")
     return {
         "status": "ok",
         "env": settings.app_env,
         "frontend_base_url": settings.frontend_base_url,
         "backend_base_url": settings.backend_base_url,
+        "request_base_url": request_base_url,
+        "uses_localhost_defaults": any(
+            "localhost" in value
+            for value in (settings.frontend_base_url, settings.backend_base_url)
+        ),
     }
 
 
