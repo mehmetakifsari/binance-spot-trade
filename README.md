@@ -85,7 +85,9 @@ cd backend && pip install -r requirements.txt && pytest
 5. Check health:
 
 - Frontend (proxy) health: `http://localhost:8080/healthz`
-- Frontend dashboard URL: `http://localhost:8080/dashboard`
+- Frontend index URL: `http://localhost:8080/`
+- Dashboard (admin only): `http://localhost:8080/dashboard`
+- Admin login: `http://localhost:8080/login` (fixed credential: `admin / Atmaca@53`)
 - Backend health: `http://localhost:8000/api/health`
 - Bridge health (internal in Docker network): `http://bridge:8001/health`
 
@@ -119,6 +121,7 @@ The backend keeps trade decisions deterministic and rule-based. Any AI service c
 ## Security & Config
 
 - All secrets/config are read from environment variables.
+- Admin password hash is stored in MongoDB (`admin_users`) and refreshed automatically in background; manual hash update is not required.
 - Never commit real API keys.
 - `OPENAI_API_KEY` is optional and must never execute trade decisions.
 
@@ -132,6 +135,6 @@ The backend keeps trade decisions deterministic and rule-based. Any AI service c
 ## TODOs (MVP-next)
 
 - Connect n8n workflow payload format to `/signals` endpoint end-to-end
-- Add auth for dashboard endpoints
+- Expand role-based auth for additional management endpoints
 - Add background scheduler for end-of-day / weekly / monthly report jobs
 - Add integration tests for state transitions and PnL calculations

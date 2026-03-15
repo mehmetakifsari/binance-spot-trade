@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     signal_collector_period: int = 14
     signal_collector_loop_seconds: int = 60
 
+    mongodb_uri: str = "mongodb://localhost:27017"
+    mongodb_auth_db: str = "visutrade_auth"
+    mongodb_auth_collection: str = "admin_users"
+
     @model_validator(mode="after")
     def apply_environment_defaults(self) -> "Settings":
         is_production_like = self.app_env.lower() in {"production", "staging"}
