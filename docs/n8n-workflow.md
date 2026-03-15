@@ -179,6 +179,31 @@ Beklenen alanlar:
 - **422 from backend**: n8n payload alanları backend modeli ile uyuşmuyor.
 - **No executions**: bridge tarafında `N8N_WEBHOOK_URL` yanlış/boş veya bridge redeploy edilmemiş.
 
+### 6.4) `Build Signal Payload` node'unda Python (Native) hatası
+
+Mobilde düzenleme yaparken n8n'in örnek kodu yanlış satır kırılırsa şu tip bir syntax hatası oluşur:
+
+```python
+item["json"]
+["my_new_field"] = 1
+```
+
+Yukarıdaki kullanımda ikinci satır yeni bir liste gibi yorumlandığı için node fail olur.
+
+Eğer **Language = Python (Native)** kullanacaksan kodu aşağıdaki gibi tek satır erişimle yaz:
+
+```python
+for item in _items:
+    item["json"]["my_new_field"] = 1
+
+return _items
+```
+
+> Notlar:
+> - `Run Once for All Items` modunda `for item in _items` kullan.
+> - `Run Once for Each Item` modunda `_item` kullanıp tek obje dön.
+> - Bu repodaki import workflow'lar varsayılan olarak `JavaScript` Code node ile gelir; Python'a geçersen kodu tamamen Python sözdizimiyle güncelle.
+
 ## 7) Olası Sorunlar
 
 - **Bridge configured=false**
