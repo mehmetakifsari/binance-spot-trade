@@ -38,8 +38,8 @@ services:
       - backend
     environment:
       BACKEND_ORIGIN: http://backend:8000
-    ports:
-      - "8080:80"
+    expose:
+      - "80"
 
 volumes:
   postgres_data:
