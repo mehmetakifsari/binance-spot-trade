@@ -33,7 +33,6 @@ MVP'de dashboard backend içinde render edildiği için iki seçenek vardır:
 ## Environment variables
 
 Required:
-- `N8N_WEBHOOK_URL`
 - `BINANCE_STREAM`
 - `DB_HOST`
 - `DB_PORT`
@@ -48,6 +47,7 @@ Required:
 - `CORS_ALLOWED_ORIGINS`
 
 Optional:
+- `N8N_WEBHOOK_URL` (unset ise bridge worker pasif başlar, servis yine ayağa kalkar)
 - `OPENAI_API_KEY` (explanation/report text only)
 
 ## Deployment order
