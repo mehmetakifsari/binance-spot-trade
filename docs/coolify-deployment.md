@@ -63,6 +63,8 @@ Optional:
 5. Deploy bridge service with Binance + n8n vars.
 6. Configure n8n workflow to call backend `POST /api/signals` endpoint.
 
+Detaylı workflow kurulumu ve import edilebilir örnek için: [docs/n8n-workflow.md](n8n-workflow.md).
+
 ## Service relationships
 
 - Bridge -> n8n webhook
