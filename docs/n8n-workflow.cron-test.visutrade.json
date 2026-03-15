@@ -24,7 +24,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{$env.BINANCE_TICKER_URL || 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'}}",
+        "url": "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
         "options": {}
       },
       "id": "Fetch_Binance_Ticker",
@@ -53,7 +53,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.BACKEND_SIGNAL_URL || 'https://api-trade.visupanel.com/api/signals'}}",
+        "url": "https://api-trade.visupanel.com/api/signals",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
