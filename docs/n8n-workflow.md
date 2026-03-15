@@ -226,7 +226,7 @@ return _items
 Evet, test için n8n tarafına ayrı bir **Cron workflow** ekleyebilirsin. Bu yöntem üretim akışını bozmaz:
 
 - Üretim: `bridge-service -> /webhook/visutrade-signal` (aynı kalır)
-- Test: `Schedule Trigger -> Binance REST ticker -> /api/signals`
+- Test: `Schedule Trigger -> Binance REST klines -> /api/signals`
 
 Bu repo içinde import edilebilir test workflow dosyası:
 
@@ -235,9 +235,9 @@ Bu repo içinde import edilebilir test workflow dosyası:
 ### Ne yapar?
 
 1. Her 1 dakikada tetiklenir (`Schedule Trigger`).
-2. Binance REST'ten anlık fiyat çeker (`/api/v3/ticker/price?symbol=BTCUSDT`).
-3. n8n static data ile RSI + flag hesaplar.
-4. Backend `POST /api/signals` endpoint'ine yollar.
+2. Binance REST'ten candle verisi çeker (`/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=200`).
+3. RSI'yı candle close serisinden hesaplar (Binance endpoint RSI döndürmediği için).
+4. Son close fiyatı ile flag'leri üretip backend `POST /api/signals` endpoint'ine yollar.
 
 ### Kullanım önerisi
 
