@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Awaitable, Any
 
@@ -19,8 +21,34 @@ from .paper_trading import BalanceState, execute_buy, execute_sell
 from .reporting import format_summary
 from .state_machine import BotState, RuntimeState, SignalInput, evaluate_signal
 from .telegram import TelegramNotifier
+from .signal_collector import CollectorConfig, SignalCollector
 
-app = FastAPI(title="VisuTrade Backend + Dashboard")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global collector, collector_task
+    if settings.signal_collector_enabled:
+        collector = SignalCollector(
+            CollectorConfig(
+                symbol=settings.signal_collector_symbol,
+                interval=settings.signal_collector_interval,
+                limit=settings.signal_collector_limit,
+                period=settings.signal_collector_period,
+                loop_seconds=settings.signal_collector_loop_seconds,
+            ),
+            on_signal=lambda payload: _process_signal(SignalPayload.model_validate(payload)),
+        )
+        collector_task = asyncio.create_task(collector.run_forever())
+        logger.info("Signal collector enabled for %s", settings.signal_collector_symbol)
+    try:
+        yield
+    finally:
+        if collector:
+            collector.stop()
+        if collector_task:
+            collector_task.cancel()
+
+
+app = FastAPI(title="VisuTrade Backend + Dashboard", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins(),
@@ -32,6 +60,8 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
 logger = logging.getLogger(__name__)
+collector: SignalCollector | None = None
+collector_task: asyncio.Task | None = None
 
 
 async def _safe_notify(event: str, notify_call: Awaitable[None]) -> None:
@@ -158,10 +188,7 @@ async def health(request: Request) -> dict:
     }
 
 
-@app.post("/signals")
-@app.post("/api/signals")
-async def process_signal(request: Request) -> dict:
-    payload = _parse_signal_payload(await request.json())
+async def _process_signal(payload: SignalPayload) -> dict:
     db = SessionLocal()
     try:
         state = _fetch_or_init_state(db, payload.symbol)
@@ -268,6 +295,46 @@ async def process_signal(request: Request) -> dict:
         raise
     finally:
         db.close()
+
+
+
+
+@app.post("/signals")
+@app.post("/api/signals")
+async def process_signal(request: Request) -> dict:
+    payload = _parse_signal_payload(await request.json())
+    return await _process_signal(payload)
+
+
+@app.post("/api/admin/signal-collector/run-once")
+async def run_signal_collector_once() -> dict:
+    global collector
+    if not collector:
+        collector = SignalCollector(
+            CollectorConfig(
+                symbol=settings.signal_collector_symbol,
+                interval=settings.signal_collector_interval,
+                limit=settings.signal_collector_limit,
+                period=settings.signal_collector_period,
+                loop_seconds=settings.signal_collector_loop_seconds,
+            ),
+            on_signal=lambda payload: _process_signal(SignalPayload.model_validate(payload)),
+        )
+    await collector.run_once()
+    return {"status": "ok", "last_run_at": collector.last_run_at.isoformat() if collector.last_run_at else None}
+
+
+@app.get("/api/admin/signal-collector")
+async def signal_collector_status() -> dict:
+    return {
+        "enabled": settings.signal_collector_enabled,
+        "running": collector.running if collector else False,
+        "symbol": settings.signal_collector_symbol,
+        "interval": settings.signal_collector_interval,
+        "loop_seconds": settings.signal_collector_loop_seconds,
+        "last_run_at": collector.last_run_at.isoformat() if collector and collector.last_run_at else None,
+        "last_error": collector.last_error if collector else None,
+    }
 
 
 @app.get("/signals")

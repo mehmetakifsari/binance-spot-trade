@@ -15,7 +15,7 @@
    - Exposes `/health` (bridge)
    - Handles reconnect with backoff
 
-2. **n8n Workflow**
+2. **n8n Workflow (optional)**
    - Receives bridge payload
    - Can enrich/transforms data
    - Calls backend `/api/signals` with normalized signal payload
@@ -26,6 +26,7 @@
    - Persists state and trades in PostgreSQL
    - Sends Telegram events
    - Serves MVP dashboard pages
+   - Optional internal signal collector (cron loop) can fetch Binance klines and produce `/api/signals` payloads without n8n
 
 4. **PostgreSQL**
    - Stores bot state, trades, positions, snapshots, report cache
