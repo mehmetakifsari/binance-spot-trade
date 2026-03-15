@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Login</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="auth-wrap">
+    <section class="auth-card">
+      <h2>Admin Panel Girişi</h2>
+      <p>Dashboard erişimi için giriş yapın.</p>
+      {% if error %}
+      <div class="alert-error">{{ error }}</div>
+      {% endif %}
+      <form method="post" action="/login" class="auth-form">
+        <label>Kullanıcı Adı</label>
+        <input type="text" name="username" required />
+        <label>Şifre</label>
+        <input type="password" name="password" required />
+        <button class="btn" type="submit">Giriş Yap</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

@@ -14,6 +14,15 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
 
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    expose:
+      - "27017"
+    volumes:
+      - mongo_data:/data/db
+
   bridge:
     build:
       context: ./bridge_service
@@ -27,6 +36,7 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+      - mongo
     expose:
       - "8000"
 
@@ -43,3 +53,5 @@ services:
 
 volumes:
   postgres_data:
+
+  mongo_data:

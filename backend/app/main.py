@@ -4,11 +4,15 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import hashlib
+import hmac
+import os
+import secrets
 from typing import Awaitable, Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -25,7 +29,9 @@ from .signal_collector import CollectorConfig, SignalCollector
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global collector, collector_task
+    global collector, collector_task, admin_hash_sync_task
+    _upsert_admin_user()
+    admin_hash_sync_task = asyncio.create_task(_admin_hash_sync_loop())
     if settings.signal_collector_enabled:
         collector = SignalCollector(
             CollectorConfig(
@@ -46,6 +52,8 @@ async def lifespan(app: FastAPI):
             collector.stop()
         if collector_task:
             collector_task.cancel()
+        if admin_hash_sync_task:
+            admin_hash_sync_task.cancel()
 
 
 app = FastAPI(title="VisuTrade Backend + Dashboard", lifespan=lifespan)
@@ -62,6 +70,122 @@ notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_
 logger = logging.getLogger(__name__)
 collector: SignalCollector | None = None
 collector_task: asyncio.Task | None = None
+admin_hash_sync_task: asyncio.Task | None = None
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "Atmaca@53"
+SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
+
+
+def _hash_password(password: str, salt: bytes | None = None) -> str:
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
+    return f"pbkdf2_sha256$120000${salt.hex()}${digest.hex()}"
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    try:
+        algorithm, iterations, salt_hex, digest_hex = password_hash.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        new_digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iterations),
+        ).hex()
+        return hmac.compare_digest(new_digest, digest_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def _session_signature(token: str) -> str:
+    payload = f"{token}:{SESSION_SIGNING_PEPPER}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _build_session_cookie_value(token: str) -> str:
+    return f"{token}.{_session_signature(token)}"
+
+
+def _parse_session_cookie(raw_cookie: str) -> str | None:
+    if not raw_cookie or "." not in raw_cookie:
+        return None
+    token, signature = raw_cookie.split(".", 1)
+    if not token or not hmac.compare_digest(signature, _session_signature(token)):
+        return None
+    return token
+
+
+def _mongo_collection():
+    from pymongo import MongoClient
+
+    client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
+    return client[settings.mongodb_auth_db][settings.mongodb_auth_collection]
+
+
+def _sync_admin_hash_mongodb() -> None:
+    collection = _mongo_collection()
+    existing = collection.find_one({"username": DEFAULT_ADMIN_USERNAME})
+    if existing and _verify_password(DEFAULT_ADMIN_PASSWORD, existing.get("password_hash", "")):
+        return
+
+    password_hash = _hash_password(DEFAULT_ADMIN_PASSWORD)
+    now = datetime.now(timezone.utc)
+    collection.update_one(
+        {"username": DEFAULT_ADMIN_USERNAME},
+        {
+            "$set": {"password_hash": password_hash, "updated_at": now},
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+
+
+def _sync_admin_session(token: str) -> None:
+    collection = _mongo_collection()
+    now = datetime.now(timezone.utc)
+    collection.update_one(
+        {"username": DEFAULT_ADMIN_USERNAME},
+        {
+            "$set": {"session_token": token, "session_updated_at": now},
+        },
+    )
+
+
+def _clear_admin_session(token: str | None = None) -> None:
+    collection = _mongo_collection()
+    query = {"username": DEFAULT_ADMIN_USERNAME}
+    if token:
+        query["session_token"] = token
+    collection.update_one(query, {"$unset": {"session_token": "", "session_updated_at": ""}})
+
+
+def _is_admin(request: Request) -> bool:
+    raw_cookie = request.cookies.get("admin_session", "")
+    token = _parse_session_cookie(raw_cookie)
+    if not token:
+        return False
+    collection = _mongo_collection()
+    row = collection.find_one({"username": DEFAULT_ADMIN_USERNAME, "session_token": token})
+    return bool(row)
+
+
+def _require_admin(request: Request) -> None:
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authorization required")
+
+
+def _upsert_admin_user() -> None:
+    _sync_admin_hash_mongodb()
+
+
+async def _admin_hash_sync_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_sync_admin_hash_mongodb)
+        except Exception as exc:
+            logger.warning("Mongo admin hash sync failed: %s", exc)
+        await asyncio.sleep(300)
 
 
 async def _safe_notify(event: str, notify_call: Awaitable[None]) -> None:
@@ -307,7 +431,8 @@ async def process_signal(request: Request) -> dict:
 
 
 @app.post("/api/admin/signal-collector/run-once")
-async def run_signal_collector_once() -> dict:
+async def run_signal_collector_once(request: Request) -> dict:
+    _require_admin(request)
     global collector
     if not collector:
         collector = SignalCollector(
@@ -325,7 +450,8 @@ async def run_signal_collector_once() -> dict:
 
 
 @app.get("/api/admin/signal-collector")
-async def signal_collector_status() -> dict:
+async def signal_collector_status(request: Request) -> dict:
+    _require_admin(request)
     return {
         "enabled": settings.signal_collector_enabled,
         "running": collector.running if collector else False,
@@ -353,8 +479,55 @@ async def signal_endpoint_help() -> dict:
     }
 
 
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": _is_admin(request)})
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    if _is_admin(request):
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    collection = _mongo_collection()
+    row = collection.find_one({"username": username})
+
+    if not row or not _verify_password(password, row.get("password_hash", "")):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Kullanıcı adı veya şifre hatalı."},
+            status_code=401,
+        )
+
+    session_token = secrets.token_urlsafe(32)
+    _sync_admin_session(session_token)
+
+    response = RedirectResponse(url="/dashboard", status_code=302)
+    response.set_cookie("admin_session", _build_session_cookie_value(session_token), httponly=True, samesite="lax")
+    return response
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    raw_cookie = request.cookies.get("admin_session", "")
+    token = _parse_session_cookie(raw_cookie)
+    if token:
+        _clear_admin_session(token)
+
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie("admin_session")
+    return response
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/login", status_code=302)
+
     db = SessionLocal()
     try:
         row = db.execute(text("SELECT * FROM bot_state ORDER BY updated_at DESC LIMIT 1")).mappings().first()
@@ -372,6 +545,7 @@ async def dashboard(request: Request):
     realized_pnl = equity - settings.starting_balance_usdt - unrealized_pnl
     context = {
         "request": request,
+        "is_admin": _is_admin(request),
         "state": row,
         "start_balance": settings.starting_balance_usdt,
         "equity": equity,
@@ -390,7 +564,7 @@ async def trades_page(request: Request):
         trades = []
     finally:
         db.close()
-    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades})
+    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades, "is_admin": _is_admin(request)})
 
 
 @app.get("/reports", response_class=HTMLResponse)
@@ -404,7 +578,7 @@ async def reports_page(request: Request):
         db.close()
     equity = float(latest["equity_usdt"]) if latest else settings.starting_balance_usdt
     summary = format_summary(settings.starting_balance_usdt, equity, equity - settings.starting_balance_usdt, 0.0)
-    return templates.TemplateResponse("reports.html", {"request": request, "summary": summary})
+    return templates.TemplateResponse("reports.html", {"request": request, "summary": summary, "is_admin": _is_admin(request)})
 
 
 @app.get("/state-monitor", response_class=HTMLResponse)
@@ -416,4 +590,4 @@ async def state_monitor(request: Request):
         states = []
     finally:
         db.close()
-    return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc)})
+    return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc), "is_admin": _is_admin(request)})
