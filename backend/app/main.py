@@ -31,6 +31,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
 
 
+def _is_localhost_url(value: str) -> bool:
+    normalized = value.lower()
+    return "localhost" in normalized or "127.0.0.1" in normalized
+
+
+def _effective_base_url(configured_base_url: str, request_base_url: str) -> str:
+    if not configured_base_url or _is_localhost_url(configured_base_url):
+        return request_base_url
+    return configured_base_url
+
+
 class SignalPayload(BaseModel):
     symbol: str = "BTCUSDT"
     price: float
@@ -103,14 +114,17 @@ def _update_position_snapshot(db, symbol: str, price: float, cash: float, asset_
 @app.get("/api/health")
 async def health(request: Request) -> dict:
     request_base_url = str(request.base_url).rstrip("/")
+    frontend_base_url = _effective_base_url(settings.frontend_base_url, request_base_url)
+    backend_base_url = _effective_base_url(settings.backend_base_url, request_base_url)
+
     return {
         "status": "ok",
         "env": settings.app_env,
-        "frontend_base_url": settings.frontend_base_url,
-        "backend_base_url": settings.backend_base_url,
+        "frontend_base_url": frontend_base_url,
+        "backend_base_url": backend_base_url,
         "request_base_url": request_base_url,
         "uses_localhost_defaults": any(
-            "localhost" in value
+            _is_localhost_url(value)
             for value in (settings.frontend_base_url, settings.backend_base_url)
         ),
     }
