@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Dashboard</h2>
+<div class="grid">
+  <section class="card"><h3>Starting Balance</h3><p>{{ "%.2f"|format(start_balance) }} USDT</p></section>
+  <section class="card"><h3>Current Equity</h3><p>{{ "%.2f"|format(equity) }} USDT</p></section>
+  <section class="card"><h3>Current State</h3><p>{{ state.state if state else "N/A" }}</p></section>
+  <section class="card"><h3>Active Position</h3><p>{{ "%.6f"|format(state.asset_qty) if state else "0" }}</p></section>
+  <section class="card"><h3>Realized PnL</h3><p>{{ "%.4f"|format(realized_pnl) }} USDT</p></section>
+  <section class="card"><h3>Unrealized PnL</h3><p>{{ "%.4f"|format(unrealized_pnl) }} USDT</p></section>
+</div>
+{% endblock %}

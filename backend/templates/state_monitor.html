@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>State Monitor</h2>
+<table>
+  <thead><tr><th>Symbol</th><th>State</th><th>RSI</th><th>Drop Blocks</th><th>Rise Blocks</th><th>Cooldown</th><th>Panic</th></tr></thead>
+  <tbody>
+    {% for s in states %}
+    <tr>
+      <td>{{ s.symbol }}</td>
+      <td>{{ s.state }}</td>
+      <td>{{ s.latest_rsi }}</td>
+      <td>{{ s.drop_blocks }}</td>
+      <td>{{ s.rise_blocks }}</td>
+      <td>{{ s.cooldown_until }}</td>
+      <td>{{ s.panic_mode }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
