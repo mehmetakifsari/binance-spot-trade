@@ -9,8 +9,9 @@ Bu proje Coolify üzerinde iki ana domain ile çalışacak şekilde tasarlanmı�
 
 1. `bridge-service` (Dockerfile: `bridge_service/Dockerfile`)
 2. `backend-service` (Dockerfile: `backend/Dockerfile`)
-3. `postgres` managed DB resource
-4. optional `n8n` service resource
+3. `frontend-service` (Dockerfile: `frontend/Dockerfile`, nginx reverse proxy)
+4. `postgres` managed DB resource
+5. optional `n8n` service resource
 
 ## Domain mapping (Coolify)
 
@@ -20,15 +21,18 @@ Bu proje Coolify üzerinde iki ana domain ile çalışacak şekilde tasarlanmı�
 - Healthcheck: `/api/health`
 
 ### Frontend service
-MVP'de dashboard backend içinde render edildiği için iki seçenek vardır:
+Bu repoda `frontend/` altında nginx reverse proxy eklidir ve `trade.visupanel.com` için önerilen kurulum budur.
 
-1. **Hızlı MVP (önerilen)**: Ayrı frontend servisi açmadan, dashboard'u backend'den servis et:
-   - URL: `https://api-trade.visupanel.com/dashboard`
-2. **İstenen domain yapısı** (`trade.visupanel.com`) için:
-   - Ayrı bir frontend service (ör. static reverse proxy veya ayrı UI app) deploy edin.
-   - Frontend API target: `https://api-trade.visupanel.com`
+- Domain: `trade.visupanel.com`
+- Port: `8080`
+- Healthcheck: `/healthz`
+- Runtime env: `BACKEND_ORIGIN=http://backend-service:8000` (Coolify internal URL)
 
-> Not: Bu repoda API + template dashboard tek backend servisinde tutulmuştur; domain ayrımı environment ve CORS ile desteklenir.
+Proxy davranışı:
+- `/` -> `/dashboard` yönlendirmesi yapar.
+- Tüm istekleri backend servise iletir (dashboard + API).
+
+> Not: Dashboard template backend içinde render edilmeye devam eder; frontend servis sadece domain ayrımı için reverse proxy görevi görür.
 
 ## Environment variables
 
@@ -55,9 +59,9 @@ Optional:
 1. Deploy PostgreSQL and capture connection credentials.
 2. Deploy backend service (`api-trade.visupanel.com`) with DB + Telegram + URL/CORS env vars.
 3. Run SQL migration `migrations/001_init.sql`.
-4. Deploy bridge service with Binance + n8n vars.
-5. Configure n8n workflow to call backend `POST /api/signals` endpoint.
-6. (Optional) Deploy dedicated frontend service for `trade.visupanel.com`.
+4. Deploy frontend reverse-proxy service (`trade.visupanel.com`) with `BACKEND_ORIGIN` set to backend internal URL.
+5. Deploy bridge service with Binance + n8n vars.
+6. Configure n8n workflow to call backend `POST /api/signals` endpoint.
 
 ## Service relationships
 
@@ -70,3 +74,4 @@ Optional:
 
 - Bridge: `GET /health`
 - Backend: `GET /api/health`
+- Frontend proxy: `GET /healthz`
