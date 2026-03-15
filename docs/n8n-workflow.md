@@ -179,30 +179,66 @@ Beklenen alanlar:
 - **422 from backend**: n8n payload alanları backend modeli ile uyuşmuyor.
 - **No executions**: bridge tarafında `N8N_WEBHOOK_URL` yanlış/boş veya bridge redeploy edilmemiş.
 
-### 6.4) `Build Signal Payload` node'unda Python (Native) hatası
+### 6.4) `Build Signal Payload` node'unda JavaScript / Python hataları
 
-Mobilde düzenleme yaparken n8n'in örnek kodu yanlış satır kırılırsa şu tip bir syntax hatası oluşur:
+`Fetch Binance Klines` çıktısı, tek bir item içinde **array (liste)** döndürür.
+Bu yüzden Code node'da örnek gelen `item.json.myNewField = 1` şablonu bu akışta doğrudan çalışmaz.
 
-```python
-item["json"]
-["my_new_field"] = 1
+> Kritik: n8n bazen node dili değişince varsayılan örnek kodu geri yazar. `Build Signal Payload` içinde `myNewField` görüyorsan kod resetlenmiştir; tüm kodu silip bu dokümandaki örneği **tamamını** yapıştır.
+
+#### Hata 1: JavaScript'te `A 'json' property isn't an object`
+
+Bu hata, output'ta `json` alanına object yerine array bırakıldığında oluşur.
+Bu akışta doğru yaklaşım, klines listesini okuyup **yeni bir object** dönmektir:
+
+```javascript
+const out = [];
+
+for (const item of $input.all()) {
+  const rows = item.json; // Binance klines: [[openTime, open, high, low, close, ...], ...]
+  const closes = rows.map((r) => Number(r[4])).filter((v) => Number.isFinite(v));
+
+  const price = closes[closes.length - 1];
+
+  out.push({
+    json: {
+      symbol: 'BTCUSDT',
+      price,
+    },
+  });
+}
+
+return out;
 ```
 
-Yukarıdaki kullanımda ikinci satır yeni bir liste gibi yorumlandığı için node fail olur.
+#### Hata 2: Python'da `list indices must be integers or slices, not str`
 
-Eğer **Language = Python (Native)** kullanacaksan kodu aşağıdaki gibi tek satır erişimle yaz:
+Bu hata, `item["json"]` gibi bir erişim denendiğinde görülür; çünkü bu akışta `item`
+bir dict değil, doğrudan list (klines satırları) olur.
+
+`Python (Native)` için aynı mantığın doğru kullanımı:
 
 ```python
-for item in _items:
-    item["json"]["my_new_field"] = 1
+out = []
 
-return _items
+for rows in _items:
+    closes = [float(r[4]) for r in rows if len(r) > 4]
+    price = closes[-1]
+
+    out.append({
+        "symbol": "BTCUSDT",
+        "price": price,
+    })
+
+return out
 ```
 
-> Notlar:
-> - `Run Once for All Items` modunda `for item in _items` kullan.
-> - `Run Once for Each Item` modunda `_item` kullanıp tek obje dön.
-> - Bu repodaki import workflow'lar varsayılan olarak `JavaScript` Code node ile gelir; Python'a geçersen kodu tamamen Python sözdizimiyle güncelle.
+#### Hata 3: Workflow JSON import sonrası Language alanı seçilemiyor
+
+- Bu repodaki import workflow'lar varsayılan olarak `JavaScript` Code node ile gelir.
+- Bazı n8n sürümlerinde/eski node versiyonlarında import edilen node'da dil alanı kilitli görünebilir.
+- Çözüm: yeni bir Code node oluşturup `Language` seçimini o node'da yap, sonra kodu yapıştır.
+- Alternatif: mevcut node'u silip aynı bağlantılarla tekrar ekle.
 
 ## 7) Olası Sorunlar
 
