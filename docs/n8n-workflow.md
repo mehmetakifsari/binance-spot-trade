@@ -211,6 +211,46 @@ for (const item of $input.all()) {
 return out;
 ```
 
+### 6.4.1) Aynı hatayı sürekli alıyorsan hızlı teşhis (5 dakika)
+
+Bu hatanın kök nedeni neredeyse her zaman aynıdır: Code node bir noktada `return [{ json: [...] }]` ya da
+`item.json = [...]` gibi bir şey üretir. n8n ise her item için `json` alanında **object** bekler.
+
+Adım adım kontrol et:
+
+1. Hata veren Code node'u aç ve `console.log` yerine geçici olarak aşağıdaki satırı en üste ekle:
+
+```javascript
+if (Array.isArray($json)) {
+  throw new Error('Input doğrudan array geldi; önce object üretmelisin.');
+}
+```
+
+2. Node ayarında **Mode** değerini kontrol et:
+   - `Run Once for All Items` kullanıyorsan `return [{ json: { ... } }]` veya `return out` formatında dön.
+   - `Run Once for Each Item` kullanıyorsan `return { ... }` (tek object) dön; `[{ json: ... }]` dönme.
+
+3. Execution data'da bir önceki node çıktısını doğrula:
+   - Eğer çıktı `[[...], [...]]` gibi nested list ise önce `Item Lists` / `Code` ile normalize et.
+   - Hedef format her zaman şu olmalı: `[{ json: { key: value } }]`.
+
+4. Node içinde `myNewField` veya default template geri geldiyse node resetlenmiştir; kodu tamamen silip yeniden yapıştır.
+
+### 6.4.2) Alternatif yöntemler (Code node'a takılmadan)
+
+Eğer Code node sürekli sorun çıkarıyorsa aşağıdaki iki yöntem daha stabil çalışır:
+
+1. **Function Item / Edit Fields (Set) yaklaşımı**
+   - Önce `HTTP Request` çıktısını `Set` node ile alan alan map et.
+   - Ardından küçük bir `Code`/`Function Item` ile sadece RSI hesabını yap.
+   - Bu şekilde tüm payload'ı tek yerde elle kurmazsın, `json` tipi daha az bozulur.
+
+2. **Split + Aggregate yaklaşımı**
+   - `Item Lists > Split Out Items` ile kline array'ini item'lara böl.
+   - İhtiyaç alanlarını (`close`) çıkar.
+   - Sonra `Code` node'da saf number listesi üzerinden RSI hesapla.
+   - Özellikle import edilen workflow farklı n8n versiyonunda açıldığında daha az format hatası verir.
+
 #### Hata 2: Python'da `list indices must be integers or slices, not str`
 
 Bu hata, `item["json"]` gibi bir erişim denendiğinde görülür; çünkü bu akışta `item`
