@@ -215,6 +215,11 @@ return _items
 - **RSI hep 50**
   - Yeni boot sonrası yeterli price history birikmemiş olabilir.
 
+- **HTTP Request/Set node'unda `{{$json.rsi}}` gibi alanlar `undefined`**
+  - Webhook node'u bazı n8n sürümlerinde payload'ı `json.body` altında verir.
+  - Bu durumda expression'ları geçici olarak `{{$json.body.rsi}}` gibi görürsün; kalıcı çözüm Normalize node'unda hem `json` hem `json.body` formatını desteklemektir (repo'daki import JSON bu desteği içerir).
+  - `Build Signal Payload` node çıktısında `rsi`, `is_bearish`, `is_bullish`, `panic_score` alanlarının gerçekten üretildiğini execution data'dan doğrula.
+
 
 ## 8) Opsiyonel: n8n içinde Cron ile test akışı (bridge'e dokunmadan)
 
