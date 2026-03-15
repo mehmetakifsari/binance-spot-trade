@@ -2,6 +2,9 @@
 
 Bu doküman, Coolify üzerinde çalışan mevcut mimaride Binance verisini alıp `bridge-service` üzerinden n8n'e taşıyarak backend `POST /api/signals` endpoint'ine nasıl ileteceğini adım adım anlatır.
 
+> Not: n8n artık zorunlu değildir. İstersen backend içindeki internal collector (cron loop) ile n8n'yi tamamen devre dışı bırakabilirsin.
+> Bunun için `SIGNAL_COLLECTOR_ENABLED=true` set edilmesi yeterlidir.
+
 ## 1) Akış Özeti
 
 Bu repodaki data flow şu şekilde tasarlanmıştır:
@@ -320,3 +323,56 @@ Bu repo içinde import edilebilir test workflow dosyası:
 - Bu cron workflow'u **sadece staging/test** ortamında aktif et.
 - Aynı anda hem bridge webhook akışı hem cron test akışı açıksa backend'e daha sık sinyal gider.
 - Test bitince cron workflow'u durdur.
+
+## 9) `Send Signal` (HTTP Request) hatasını neden görüyoruz?
+
+`Send Signal` node'unda görülen hataların çoğu, `dashboard` alanından değil, n8n -> backend çağrısının teknik detaylarından kaynaklanır. En sık sebepler:
+
+1. **422 validation error (backend)**
+   - `/api/signals` endpoint'i şu alanları bekler: `symbol`, `price`, `rsi`, `is_bearish`, `is_bullish`, `panic_score`.
+   - n8n bu alanlardan birini eksik/farklı tipte gönderirse backend 422 döner.
+
+2. **404 / 401 (webhook veya hedef URL)**
+   - `webhook-test` ile `webhook` URL'lerinin karışması.
+   - Workflow active olmadan production URL çağırılması.
+
+3. **n8n expression / env kısıtı**
+   - Bazı kurulumlarda `{{$env.*}}` kapalıdır; URL expression'ı çalışmaz.
+   - Bu yüzden HTTP Request URL alanında doğrudan sabit URL kullanımı daha güvenlidir.
+
+4. **Timeout / geçici ağ hatası**
+   - n8n'den backend'e giden tekil HTTP çağrısı anlık ağ dalgalanmasında fail olabilir.
+
+## 10) "Dashboard zaten Cron ile veri almıyor mu?"
+
+Bu repodaki üretim tasarımında dashboard veri kaynağı doğrudan Cron değildir.
+
+- **Ana üretim akışı:** `bridge-service (Binance WS) -> n8n webhook -> backend /api/signals -> dashboard`
+- **Cron workflow:** sadece opsiyonel test/staging veya fallback için önerilir.
+
+Yani dashboard güncellemesi backend'e düşen sinyal kayıtlarından gelir; Cron zorunlu değil, ek bir tetikleme seçeneğidir.
+
+## 11) HTTP request ile sinyal göndermenin daha sağlıklı yolları
+
+Evet, tek node ile "fire-and-forget" yerine daha dayanıklı bir desen kurabilirsin:
+
+1. **Retry + backoff (n8n HTTP Request ayarı)**
+   - HTTP Request node'da retry aç.
+   - 5xx/timeout için yeniden deneme uygula.
+
+2. **Idempotency key ekle**
+   - Aynı sinyal birden fazla kez gönderilirse backend tarafında duplicate etkisini azaltırsın.
+   - Örn: `symbol + event_time` tabanlı bir `signal_id` gönder.
+
+3. **Queue tabanlı ara katman (en sağlam yöntem)**
+   - n8n doğrudan backend yerine bir kuyruk/stream'e yazar (Redis stream, RabbitMQ, SQS vb.).
+   - Backend worker kuyruktan okuyup işler.
+   - Ağ kesintisi anında veri kaybı riski ciddi azalır.
+
+4. **Bridge doğrudan backend + n8n gözlemci modeli**
+   - Kritik path'te bridge doğrudan `/api/signals` endpoint'ine yazar.
+   - n8n'i analitik/alert/rapor için yan kanal yaparsın.
+
+5. **Devre kesici (circuit breaker) / DLQ yaklaşımı**
+   - Belirli sayıda başarısız denemede akışı DLQ'ya yönlendir.
+   - Sonradan tekrar işlenebilir sinyal havuzu tut.

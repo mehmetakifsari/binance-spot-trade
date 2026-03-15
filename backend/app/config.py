@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     panic_buy_usdt: float = 1.5
     trade_cooldown_seconds: int = 300
 
+    signal_collector_enabled: bool = False
+    signal_collector_symbol: str = "BTCUSDT"
+    signal_collector_interval: str = "15m"
+    signal_collector_limit: int = 200
+    signal_collector_period: int = 14
+    signal_collector_loop_seconds: int = 60
+
     @model_validator(mode="after")
     def apply_environment_defaults(self) -> "Settings":
         is_production_like = self.app_env.lower() in {"production", "staging"}

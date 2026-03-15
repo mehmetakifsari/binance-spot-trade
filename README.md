@@ -19,13 +19,15 @@ This repository includes:
 
 ## High-Level Architecture
 
-`Binance WebSocket -> Bridge Service -> n8n Webhook -> Signal Engine -> Paper Trade Logic -> PostgreSQL -> Telegram -> Web Dashboard`
+`Primary: Binance WebSocket -> Bridge Service -> n8n Webhook -> Signal Engine -> Paper Trade Logic -> PostgreSQL -> Telegram -> Web Dashboard`
+
+`Alternative (n8n-free): Backend Signal Collector (Cron) -> Signal Engine -> Paper Trade Logic -> PostgreSQL -> Telegram -> Web Dashboard`
 
 Production domain target (Coolify):
 - Frontend: `https://trade.visupanel.com`
 - Backend API: `https://api-trade.visupanel.com`
 
-See [docs/architecture.md](docs/architecture.md), [docs/coolify-deployment.md](docs/coolify-deployment.md), and [docs/n8n-workflow.md](docs/n8n-workflow.md) for details.
+See [docs/architecture.md](docs/architecture.md), [docs/coolify-deployment.md](docs/coolify-deployment.md), and [docs/n8n-workflow.md](docs/n8n-workflow.md) for details. n8n is optional when backend internal collector is enabled.
 
 ## Repository Structure
 
@@ -123,7 +125,9 @@ The backend keeps trade decisions deterministic and rule-based. Any AI service c
 ## API Endpoints
 
 - Health: `GET /api/health`
-- Signal ingest (n8n -> backend): `POST /api/signals`
+- Signal ingest (n8n/bridge/custom): `POST /api/signals`
+- Internal collector admin status: `GET /api/admin/signal-collector`
+- Internal collector run once: `POST /api/admin/signal-collector/run-once`
 
 ## TODOs (MVP-next)
 

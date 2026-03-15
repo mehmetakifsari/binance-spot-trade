@@ -77,6 +77,12 @@ Bu yüzden DB env yanlışsa veya migration eksikse health başarılı olsa bile
 
 Optional:
 - `N8N_WEBHOOK_URL` (unset ise bridge worker pasif başlar, servis yine ayağa kalkar)
+- `SIGNAL_COLLECTOR_ENABLED` (`true` ise backend içinde cron loop çalışır, n8n olmadan sinyal üretir)
+- `SIGNAL_COLLECTOR_SYMBOL` (default: `BTCUSDT`)
+- `SIGNAL_COLLECTOR_INTERVAL` (default: `15m`)
+- `SIGNAL_COLLECTOR_LIMIT` (default: `200`)
+- `SIGNAL_COLLECTOR_PERIOD` (default: `14`)
+- `SIGNAL_COLLECTOR_LOOP_SECONDS` (default: `60`)
 - `OPENAI_API_KEY` (explanation/report text only)
 
 ## Deployment order
@@ -85,8 +91,13 @@ Optional:
 2. Deploy backend service (`api-trade.visupanel.com`) with DB + Telegram + URL/CORS env vars.
 3. Run SQL migration `migrations/001_init.sql`.
 4. Deploy frontend reverse-proxy service (`trade.visupanel.com`) with `BACKEND_ORIGIN` set to backend internal URL.
-5. Deploy bridge service with Binance + n8n vars.
-6. Configure n8n workflow to call backend `POST /api/signals` endpoint.
+5. (Seçenek A) Deploy bridge service with Binance + n8n vars.
+6. (Seçenek A) Configure n8n workflow to call backend `POST /api/signals` endpoint.
+
+Alternatif (Seçenek B, n8n-free):
+- backend service env içinde `SIGNAL_COLLECTOR_ENABLED=true` set et.
+- collector admin gözlem endpointi: `GET /api/admin/signal-collector`.
+- collector tetikleme endpointi: `POST /api/admin/signal-collector/run-once`.
 
 Detaylı workflow kurulumu ve import edilebilir örnek için: [docs/n8n-workflow.md](n8n-workflow.md).
 
@@ -96,8 +107,8 @@ Staging/test sırasında önce n8n `webhook-test` endpointi ile smoke test yapı
 
 ## Service relationships
 
-- Bridge -> n8n webhook
-- n8n -> backend `/api/signals`
+- Seçenek A: Bridge -> n8n webhook -> backend `/api/signals`
+- Seçenek B: Backend internal collector -> `/api/signals` (n8n olmadan)
 - Test amaçlı opsiyonel n8n cron akışı (`docs/n8n-workflow.cron-test.visutrade.json`) sadece staging'de aktif edilmeli.
 - Backend -> PostgreSQL
 - Backend -> Telegram Bot API
