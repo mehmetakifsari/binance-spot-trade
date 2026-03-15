@@ -1,0 +1,133 @@
+{
+  "name": "VisuTrade Binance -> Backend Signals",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "visutrade-signal",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "Webhook_Trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        260,
+        280
+      ],
+      "webhookId": "visutrade-signal"
+    },
+    {
+      "parameters": {
+        "language": "JavaScript",
+        "jsCode": "const input = $json;\nconst data = input.data || {};\n\nconst symbol = data.s || data.symbol || 'BTCUSDT';\n\nconst priceCandidates = [\n  data.p,\n  data.c,\n  data.P,\n  data.price,\n  data.k?.c,\n  input.price,\n];\n\nconst firstPrice = priceCandidates.find((x) => x !== undefined && x !== null && x !== '');\nif (firstPrice === undefined) {\n  throw new Error('Price could not be extracted from Binance payload');\n}\n\nconst price = Number(firstPrice);\nif (!Number.isFinite(price) || price <= 0) {\n  throw new Error(`Invalid price extracted: ${firstPrice}`);\n}\n\nreturn [{\n  json: {\n    symbol,\n    price,\n    eventType: data.e || 'unknown',\n    exchangeTime: data.E || Date.now(),\n    receivedAt: input.received_at || new Date().toISOString(),\n    raw: input,\n  },\n}];"
+      },
+      "id": "Normalize_Binance_Event",
+      "name": "Normalize Binance Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "language": "JavaScript",
+        "jsCode": "const period = 14;\nconst panicThreshold = 2.0;\n\nconst out = [];\nfor (const item of $input.all()) {\n  const { symbol, price } = item.json;\n\n  const store = $getWorkflowStaticData('global');\n  store.priceHistory = store.priceHistory || {};\n  store.prevPrice = store.prevPrice || {};\n\n  const history = store.priceHistory[symbol] || [];\n  history.push(price);\n  if (history.length > period + 50) history.shift();\n  store.priceHistory[symbol] = history;\n\n  let rsi = 50;\n  if (history.length >= period + 1) {\n    let gain = 0;\n    let loss = 0;\n    const start = history.length - (period + 1);\n    for (let i = start + 1; i < history.length; i++) {\n      const diff = history[i] - history[i - 1];\n      if (diff >= 0) gain += diff; else loss += Math.abs(diff);\n    }\n\n    const avgGain = gain / period;\n    const avgLoss = loss / period;\n    if (avgLoss === 0) {\n      rsi = 100;\n    } else {\n      const rs = avgGain / avgLoss;\n      rsi = 100 - 100 / (1 + rs);\n    }\n  }\n\n  const previous = store.prevPrice[symbol];\n  store.prevPrice[symbol] = price;\n\n  let movePct = 0;\n  if (previous && previous > 0) {\n    movePct = ((price - previous) / previous) * 100;\n  }\n\n  const isBearish = movePct <= -0.15 || rsi < 35;\n  const isBullish = movePct >= 0.15 || rsi > 65;\n  const panicScore = movePct <= -panicThreshold ? Math.min(100, Math.abs(movePct) * 20) : 0;\n\n  out.push({\n    json: {\n      symbol,\n      price,\n      rsi: Number(rsi.toFixed(2)),\n      is_bearish: isBearish,\n      is_bullish: isBullish,\n      panic_score: Number(panicScore.toFixed(2)),\n    },\n  });\n}\n\nreturn out;"
+      },
+      "id": "Build_Signal_Payload",
+      "name": "Build Signal Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_SIGNAL_URL || 'https://api-trade.visupanel.com/api/signals'}}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{$json.symbol}}"
+            },
+            {
+              "name": "price",
+              "value": "={{$json.price}}"
+            },
+            {
+              "name": "rsi",
+              "value": "={{$json.rsi}}"
+            },
+            {
+              "name": "is_bearish",
+              "value": "={{$json.is_bearish}}"
+            },
+            {
+              "name": "is_bullish",
+              "value": "={{$json.is_bullish}}"
+            },
+            {
+              "name": "panic_score",
+              "value": "={{$json.panic_score}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "POST_Backend_Signal",
+      "name": "POST Backend /api/signals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1020,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Binance Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Binance Event": {
+      "main": [
+        [
+          {
+            "node": "Build Signal Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Signal Payload": {
+      "main": [
+        [
+          {
+            "node": "POST Backend /api/signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

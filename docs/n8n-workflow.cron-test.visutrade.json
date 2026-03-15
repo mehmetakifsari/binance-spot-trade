@@ -1,0 +1,137 @@
+{
+  "name": "VisuTrade Cron Test -> Binance REST -> Backend Signals",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "Schedule_Trigger",
+      "name": "Schedule Trigger (1m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.BINANCE_TICKER_URL || 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'}}",
+        "options": {}
+      },
+      "id": "Fetch_Binance_Ticker",
+      "name": "Fetch Binance Ticker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "language": "JavaScript",
+        "jsCode": "const input = $json;\nconst symbol = input.symbol || 'BTCUSDT';\nconst price = Number(input.price);\nif (!Number.isFinite(price) || price <= 0) {\n  throw new Error(`Invalid Binance ticker response: ${JSON.stringify(input)}`);\n}\n\nconst period = 14;\nconst panicThreshold = 2.0;\nconst store = $getWorkflowStaticData('global');\nstore.priceHistory = store.priceHistory || {};\nstore.prevPrice = store.prevPrice || {};\n\nconst history = store.priceHistory[symbol] || [];\nhistory.push(price);\nif (history.length > period + 50) history.shift();\nstore.priceHistory[symbol] = history;\n\nlet rsi = 50;\nif (history.length >= period + 1) {\n  let gain = 0;\n  let loss = 0;\n  const start = history.length - (period + 1);\n  for (let i = start + 1; i < history.length; i++) {\n    const diff = history[i] - history[i - 1];\n    if (diff >= 0) gain += diff; else loss += Math.abs(diff);\n  }\n  const avgGain = gain / period;\n  const avgLoss = loss / period;\n  if (avgLoss === 0) rsi = 100;\n  else {\n    const rs = avgGain / avgLoss;\n    rsi = 100 - 100 / (1 + rs);\n  }\n}\n\nconst previous = store.prevPrice[symbol];\nstore.prevPrice[symbol] = price;\nlet movePct = 0;\nif (previous && previous > 0) movePct = ((price - previous) / previous) * 100;\n\nconst isBearish = movePct <= -0.15 || rsi < 35;\nconst isBullish = movePct >= 0.15 || rsi > 65;\nconst panicScore = movePct <= -panicThreshold ? Math.min(100, Math.abs(movePct) * 20) : 0;\n\nreturn [{\n  json: {\n    symbol,\n    price,\n    rsi: Number(rsi.toFixed(2)),\n    is_bearish: isBearish,\n    is_bullish: isBullish,\n    panic_score: Number(panicScore.toFixed(2))\n  }\n}];"
+      },
+      "id": "Build_Signal_Payload",
+      "name": "Build Signal Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_SIGNAL_URL || 'https://api-trade.visupanel.com/api/signals'}}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{$json.symbol}}"
+            },
+            {
+              "name": "price",
+              "value": "={{$json.price}}"
+            },
+            {
+              "name": "rsi",
+              "value": "={{$json.rsi}}"
+            },
+            {
+              "name": "is_bearish",
+              "value": "={{$json.is_bearish}}"
+            },
+            {
+              "name": "is_bullish",
+              "value": "={{$json.is_bullish}}"
+            },
+            {
+              "name": "panic_score",
+              "value": "={{$json.panic_score}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "POST_Backend_Signal",
+      "name": "POST Backend /api/signals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (1m)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Binance Ticker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Binance Ticker": {
+      "main": [
+        [
+          {
+            "node": "Build Signal Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Signal Payload": {
+      "main": [
+        [
+          {
+            "node": "POST Backend /api/signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

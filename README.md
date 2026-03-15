@@ -25,7 +25,7 @@ Production domain target (Coolify):
 - Frontend: `https://trade.visupanel.com`
 - Backend API: `https://api-trade.visupanel.com`
 
-See [docs/architecture.md](docs/architecture.md) and [docs/coolify-deployment.md](docs/coolify-deployment.md) for details.
+See [docs/architecture.md](docs/architecture.md), [docs/coolify-deployment.md](docs/coolify-deployment.md), and [docs/n8n-workflow.md](docs/n8n-workflow.md) for details.
 
 ## Repository Structure
 
