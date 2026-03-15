@@ -79,7 +79,7 @@ cd backend && pip install -r requirements.txt && pytest
 
 5. Check health:
 
-- Bridge health: `http://localhost:8001/health`
+- Bridge health (internal in Docker network): `http://bridge:8001/health`
 - Backend health: `http://localhost:8000/health`
 - Dashboard: `http://localhost:8000/dashboard`
 
