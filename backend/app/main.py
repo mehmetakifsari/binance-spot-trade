@@ -226,10 +226,10 @@ async def _fetch_binance_exchange_symbols() -> list[str]:
     return sorted(symbols)
 
 
-async def _fetch_symbol_klines(symbol: str) -> list[list[Any]]:
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
+async def _fetch_symbol_klines(symbol: str, interval: str = "15m", limit: int = 100) -> list[list[Any]]:
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
     async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(url)
+        response = await client.get("https://api.binance.com/api/v3/klines", params=params)
         response.raise_for_status()
     data = response.json()
     if not isinstance(data, list):
@@ -299,6 +299,31 @@ def _build_spec_signal_from_klines(symbol: str, rows: list[list[Any]], period: i
         "is_bullish": is_bullish,
         "panic_score": panic_score,
         "signal_side": signal_side,
+    }
+
+
+async def _build_live_coin_analysis(interval: str = "1m", limit: int = 100) -> dict[str, Any]:
+    analyses: list[dict[str, Any]] = []
+    for symbol in _load_selected_symbols():
+        try:
+            rows = await _fetch_symbol_klines(symbol, interval=interval, limit=limit)
+            analysis = _build_spec_signal_from_klines(symbol, rows)
+            analysis["interval"] = interval
+        except Exception as exc:
+            analysis = {
+                "symbol": symbol,
+                "status": "invalid",
+                "reason": str(exc),
+                "interval": interval,
+            }
+        analyses.append(analysis)
+
+    return {
+        "day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "count": len(analyses),
+        "interval": interval,
+        "source": "live_kline",
+        "analyses": analyses,
     }
 
 
@@ -887,7 +912,7 @@ async def state_monitor(request: Request):
         states = []
     finally:
         db.close()
-    coin_analysis = _analyze_daily_coin_signals()
+    coin_analysis = await _build_live_coin_analysis(interval=settings.signal_collector_interval, limit=settings.signal_collector_limit)
     return templates.TemplateResponse(
         "state_monitor.html",
         {
@@ -895,6 +920,7 @@ async def state_monitor(request: Request):
             "states": states,
             "coin_analysis": coin_analysis,
             "now": datetime.now(timezone.utc),
+            "refresh_seconds": settings.state_monitor_refresh_seconds,
             "is_admin": _is_admin(request),
         },
     )

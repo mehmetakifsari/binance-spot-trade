@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>State Monitor</h2>
+<p>Bu sayfa {{ refresh_seconds }} saniyede bir otomatik yenilenir.</p>
+<script>setTimeout(() => window.location.reload(), {{ refresh_seconds * 1000 }});</script>
 <table>
   <thead><tr><th>Symbol</th><th>State</th><th>RSI</th><th>Drop Blocks</th><th>Rise Blocks</th><th>Cooldown</th><th>Panic</th></tr></thead>
   <tbody>
@@ -18,8 +20,8 @@
   </tbody>
 </table>
 
-<h3>Coin Listesi Sinyal Analizi (Spec v1)</h3>
-<p>Gün: {{ coin_analysis.day }} | Analiz edilen coin: {{ coin_analysis.count }}</p>
+<h3>Canlı Kline Sinyal Analizi (Spec v1)</h3>
+<p>Gün: {{ coin_analysis.day }} | Kaynak: {{ coin_analysis.source }} | Interval: {{ coin_analysis.interval }} | Analiz edilen coin: {{ coin_analysis.count }}</p>
 <table>
   <thead>
     <tr>
