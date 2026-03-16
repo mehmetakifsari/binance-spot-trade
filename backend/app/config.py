@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_auth_db: str = "visutrade_auth"
     mongodb_auth_collection: str = "admin_users"
+    mongodb_server_selection_timeout_ms: int = 300
 
     @model_validator(mode="after")
     def apply_environment_defaults(self) -> "Settings":
