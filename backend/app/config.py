@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     signal_collector_limit: int = 200
     signal_collector_period: int = 14
     signal_collector_loop_seconds: int = 60
+    state_monitor_refresh_seconds: int = 5
 
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_auth_db: str = "visutrade_auth"
