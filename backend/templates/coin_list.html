@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Coin Listesi</h2>
+<div class="card n8n-workflow-card">
+  <p>Binance spot USDT coin listesinden seçim yapın ve seçilen coinlerin 15m/100 kline verisini çekin.</p>
+  <form id="n8n-coin-form" class="n8n-coin-form">
+    <div id="n8n-coin-list" class="n8n-coin-list">Yükleniyor...</div>
+    <button class="btn" type="submit">Seçimi Kaydet</button>
+  </form>
+  <button id="fetch-data" class="btn" type="button">Seçilen Coin Verilerini Çek</button>
+  <h3>Günlük JSON Verisi</h3>
+  <pre id="daily-coin-data" class="n8n-workflow-payload"></pre>
+  <p id="coin-message"></p>
+</div>
+
+<script>
+  const form = document.getElementById("n8n-coin-form");
+  const list = document.getElementById("n8n-coin-list");
+  const message = document.getElementById("coin-message");
+  const dailyData = document.getElementById("daily-coin-data");
+  const fetchButton = document.getElementById("fetch-data");
+
+  async function loadCoinList() {
+    const response = await fetch("/api/admin/coin-list");
+    if (!response.ok) {
+      list.textContent = "Coin listesi alınamadı.";
+      return;
+    }
+
+    const data = await response.json();
+    list.innerHTML = "";
+
+    data.available_symbols.forEach((symbol) => {
+      const id = `coin-${symbol.toLowerCase()}`;
+      const wrapper = document.createElement("label");
+      wrapper.className = "n8n-coin-item";
+      wrapper.innerHTML = `
+        <input type="checkbox" name="symbols" value="${symbol}" id="${id}" ${data.selected_symbols.includes(symbol) ? "checked" : ""} />
+        <span>${symbol}</span>
+      `;
+      list.appendChild(wrapper);
+    });
+  }
+
+  async function loadDailyData() {
+    const response = await fetch("/api/admin/coin-list/daily");
+    if (!response.ok) {
+      dailyData.textContent = "Günlük veri bulunamadı.";
+      return;
+    }
+    const data = await response.json();
+    dailyData.textContent = JSON.stringify(data, null, 2);
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const selected = Array.from(form.querySelectorAll("input[name='symbols']:checked")).map((item) => item.value);
+
+    const response = await fetch("/api/admin/coin-list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbols: selected }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      message.textContent = data.detail || "Seçim kaydedilemedi.";
+      return;
+    }
+
+    message.textContent = `Kaydedildi. Seçili coin sayısı: ${data.count}`;
+  });
+
+  fetchButton.addEventListener("click", async () => {
+    fetchButton.disabled = true;
+    message.textContent = "Veriler çekiliyor...";
+
+    const response = await fetch("/api/admin/coin-list/fetch", { method: "POST" });
+    const data = await response.json();
+
+    if (!response.ok) {
+      message.textContent = data.detail || "Veri çekilemedi.";
+      fetchButton.disabled = false;
+      return;
+    }
+
+    message.textContent = `Veriler çekildi ve ${data.day} günü için JSON olarak kaydedildi.`;
+    await loadDailyData();
+    fetchButton.disabled = false;
+  });
+
+  loadCoinList();
+  loadDailyData();
+</script>
+{% endblock %}

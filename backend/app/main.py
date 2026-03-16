@@ -10,6 +10,8 @@ import os
 import secrets
 from typing import Awaitable, Any
 
+import httpx
+
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -75,8 +77,8 @@ DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "Atmaca@53"
 SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
 fallback_admin_sessions: set[str] = set()
-DEFAULT_N8N_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
-fallback_n8n_selected_symbols: set[str] = {"BTCUSDT"}
+fallback_selected_symbols: set[str] = {"BTCUSDT"}
+fallback_daily_coin_data: dict[str, dict[str, Any]] = {}
 _mongo_client = None
 
 
@@ -149,48 +151,55 @@ def _resolve_admin_status(request: Request) -> bool:
     return status
 
 
-def _mongo_settings_collection():
+def _settings_collection():
     from pymongo import MongoClient
 
     client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
     return client[settings.mongodb_auth_db]["app_settings"]
 
 
+def _daily_coin_data_collection():
+    from pymongo import MongoClient
+
+    client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
+    return client[settings.mongodb_auth_db]["daily_coin_data"]
+
+
 def _normalize_symbols(raw_symbols: list[str]) -> list[str]:
     normalized = []
     for symbol in raw_symbols:
         parsed = str(symbol).strip().upper()
-        if parsed and parsed in DEFAULT_N8N_SYMBOLS and parsed not in normalized:
+        if parsed and parsed.endswith("USDT") and parsed not in normalized:
             normalized.append(parsed)
     return normalized
 
 
-def _load_n8n_selected_symbols() -> list[str]:
+def _load_selected_symbols() -> list[str]:
     try:
-        collection = _mongo_settings_collection()
-        row = collection.find_one({"key": "n8n_selected_symbols"})
+        collection = _settings_collection()
+        row = collection.find_one({"key": "selected_symbols"})
         if row:
             symbols = _normalize_symbols(row.get("symbols", []))
             if symbols:
                 return symbols
     except Exception as exc:
-        logger.warning("Mongo n8n selected symbols lookup failed, using fallback store: %s", exc)
-    return sorted(fallback_n8n_selected_symbols)
+        logger.warning("Mongo selected symbols lookup failed, using fallback store: %s", exc)
+    return sorted(fallback_selected_symbols)
 
 
-def _save_n8n_selected_symbols(symbols: list[str]) -> list[str]:
+def _save_selected_symbols(symbols: list[str]) -> list[str]:
     normalized = _normalize_symbols(symbols)
     if not normalized:
         raise HTTPException(status_code=422, detail="En az bir coin seçilmelidir.")
 
-    fallback_n8n_selected_symbols.clear()
-    fallback_n8n_selected_symbols.update(normalized)
+    fallback_selected_symbols.clear()
+    fallback_selected_symbols.update(normalized)
 
     try:
-        collection = _mongo_settings_collection()
+        collection = _settings_collection()
         now = datetime.now(timezone.utc)
         collection.update_one(
-            {"key": "n8n_selected_symbols"},
+            {"key": "selected_symbols"},
             {
                 "$set": {"symbols": normalized, "updated_at": now},
                 "$setOnInsert": {"created_at": now},
@@ -198,106 +207,65 @@ def _save_n8n_selected_symbols(symbols: list[str]) -> list[str]:
             upsert=True,
         )
     except Exception as exc:
-        logger.warning("Mongo n8n selected symbols save failed, using fallback store: %s", exc)
+        logger.warning("Mongo selected symbols save failed, using fallback store: %s", exc)
 
     return normalized
 
 
-def _build_n8n_cron_workflow(symbol: str) -> dict[str, Any]:
-    normalized_symbol = symbol.strip().upper()
-    return {
-        "name": "VisuTrade_Final_v2",
-        "nodes": [
+async def _fetch_binance_exchange_symbols() -> list[str]:
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    payload = response.json()
+    symbols = []
+    for row in payload.get("symbols", []):
+        symbol = row.get("symbol", "")
+        if row.get("status") == "TRADING" and row.get("quoteAsset") == "USDT" and symbol:
+            symbols.append(symbol)
+    return sorted(symbols)
+
+
+async def _fetch_symbol_klines(symbol: str) -> list[list[Any]]:
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="Binance klines response invalid.")
+    return data
+
+
+def _save_daily_coin_data(symbol: str, rows: list[list[Any]]) -> None:
+    day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    fallback_daily_coin_data.setdefault(day_key, {})[symbol] = rows
+
+    try:
+        collection = _daily_coin_data_collection()
+        now = datetime.now(timezone.utc)
+        collection.update_one(
+            {"key": day_key},
             {
-                "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 1}]}},
-                "id": "Schedule_Trigger",
-                "name": "Schedule Trigger",
-                "type": "n8n-nodes-base.scheduleTrigger",
-                "typeVersion": 1.2,
-                "position": [200, 300],
+                "$set": {f"data.{symbol}": rows, "updated_at": now},
+                "$setOnInsert": {"created_at": now, "key": day_key},
             },
-            {
-                "parameters": {
-                    "url": f"https://api.binance.com/api/v3/klines?symbol={normalized_symbol}&interval=15m&limit=100",
-                    "options": {},
-                },
-                "id": "Fetch_Binance",
-                "name": "Fetch Binance",
-                "type": "n8n-nodes-base.httpRequest",
-                "typeVersion": 4.2,
-                "position": [420, 300],
-            },
-            {
-                "parameters": {
-                    "jsCode": (
-                        "const items = $input.all();\n"
-                        "const rows = items[0].json;\n\n"
-                        "if (!rows || !Array.isArray(rows) || rows.length < 20) {\n"
-                        "    throw new Error(\"Binance'den veri alınamadı!\");\n"
-                        "}\n\n"
-                        "const period = 14;\n"
-                        "const closes = rows.map(r => parseFloat(r[4])).filter(v => !isNaN(v));\n\n"
-                        "let gains = 0, losses = 0;\n"
-                        "for (let i = closes.length - period; i < closes.length; i++) {\n"
-                        "    let diff = closes[i] - closes[i - 1];\n"
-                        "    if (diff >= 0) gains += diff;\n"
-                        "    else losses += Math.abs(diff);\n"
-                        "}\n\n"
-                        "let rsi = losses === 0 ? 100 : 100 - (100 / (1 + (gains / losses)));\n"
-                        "let price = closes[closes.length - 1];\n"
-                        "let prev = closes[closes.length - 2];\n"
-                        "let move = ((price - prev) / prev) * 100;\n\n"
-                        "if (isNaN(price) || isNaN(rsi)) {\n"
-                        "    throw new Error(\"Hesaplama hatası: Fiyat veya RSI bulunamadı.\");\n"
-                        "}\n\n"
-                        "return [{\n"
-                        "    json: {\n"
-                        f"        symbol: \"{normalized_symbol}\",\n"
-                        "        price: Number(price.toFixed(2)),\n"
-                        "        rsi: Number(rsi.toFixed(2)),\n"
-                        "        is_bearish: rsi < 35 || move < -0.2,\n"
-                        "        is_bullish: rsi > 65 || move > 0.2,\n"
-                        "        panic_score: move < -1.5 ? Number((Math.abs(move) * 10).toFixed(2)) : 0\n"
-                        "    }\n"
-                        "}];"
-                    )
-                },
-                "id": "Calculate_Logic",
-                "name": "Calculate Logic",
-                "type": "n8n-nodes-base.code",
-                "typeVersion": 2,
-                "position": [640, 300],
-            },
-            {
-                "parameters": {
-                    "method": "POST",
-                    "url": "https://api-trade.visupanel.com/api/signals",
-                    "sendBody": True,
-                    "bodyParameters": {
-                        "parameters": [
-                            {"name": "symbol", "value": "={{$json.symbol}}"},
-                            {"name": "price", "value": "={{$json.price}}"},
-                            {"name": "rsi", "value": "={{$json.rsi}}"},
-                            {"name": "is_bearish", "value": "={{$json.is_bearish}}"},
-                            {"name": "is_bullish", "value": "={{$json.is_bullish}}"},
-                            {"name": "panic_score", "value": "={{$json.panic_score}}"},
-                        ]
-                    },
-                    "options": {},
-                },
-                "id": "Send_Signal",
-                "name": "Send Signal",
-                "type": "n8n-nodes-base.httpRequest",
-                "typeVersion": 4.2,
-                "position": [860, 300],
-            },
-        ],
-        "connections": {
-            "Schedule Trigger": {"main": [[{"node": "Fetch Binance", "type": "main", "index": 0}]]},
-            "Fetch Binance": {"main": [[{"node": "Calculate Logic", "type": "main", "index": 0}]]},
-            "Calculate Logic": {"main": [[{"node": "Send Signal", "type": "main", "index": 0}]]},
-        },
-    }
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("Mongo daily coin data save failed, using fallback store: %s", exc)
+
+
+def _load_daily_coin_data(day_key: str | None = None) -> dict[str, Any]:
+    target_key = day_key or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        collection = _daily_coin_data_collection()
+        row = collection.find_one({"key": target_key})
+        if row:
+            return {"day": target_key, "data": row.get("data", {})}
+    except Exception as exc:
+        logger.warning("Mongo daily coin data lookup failed, using fallback store: %s", exc)
+    return {"day": target_key, "data": fallback_daily_coin_data.get(target_key, {})}
 
 
 def _sync_admin_hash_mongodb() -> None:
@@ -400,7 +368,7 @@ class SignalPayload(BaseModel):
     panic_score: float = 0.0
 
 
-class N8NCoinSelectionPayload(BaseModel):
+class CoinSelectionPayload(BaseModel):
     symbols: list[str]
 
 
@@ -654,37 +622,59 @@ async def signal_collector_status(request: Request) -> dict:
 
 
 
-@app.get("/api/admin/n8n/coin-list")
-async def get_n8n_coin_list(request: Request) -> dict:
+@app.get("/api/admin/coin-list")
+async def get_coin_list(request: Request) -> dict:
     _require_admin(request)
+    available_symbols = await _fetch_binance_exchange_symbols()
     return {
-        "available_symbols": DEFAULT_N8N_SYMBOLS,
-        "selected_symbols": _load_n8n_selected_symbols(),
+        "available_symbols": available_symbols,
+        "selected_symbols": _load_selected_symbols(),
     }
 
 
-@app.post("/api/admin/n8n/coin-list")
-async def update_n8n_coin_list(request: Request, payload: N8NCoinSelectionPayload) -> dict:
+@app.post("/api/admin/coin-list")
+async def update_coin_list(request: Request, payload: CoinSelectionPayload) -> dict:
     _require_admin(request)
-    selected = _save_n8n_selected_symbols(payload.symbols)
-    primary_symbol = selected[0]
+    selected = _save_selected_symbols(payload.symbols)
     return {
         "status": "ok",
-        "available_symbols": DEFAULT_N8N_SYMBOLS,
         "selected_symbols": selected,
-        "workflow_payload": _build_n8n_cron_workflow(primary_symbol),
-        "note": "Bu workflow tek bir coin icin cron tabanli calisir. Coklu coin icin her coin adina ayri workflow olusturun.",
+        "count": len(selected),
     }
 
 
-@app.get("/api/n8n/coin-list")
-async def n8n_coin_list() -> dict:
-    selected = _load_n8n_selected_symbols()
+@app.post("/api/admin/coin-list/fetch")
+async def fetch_selected_coin_data(request: Request) -> dict:
+    _require_admin(request)
+    selected = _load_selected_symbols()
+    result: dict[str, list[list[Any]]] = {}
+    for symbol in selected:
+        rows = await _fetch_symbol_klines(symbol)
+        _save_daily_coin_data(symbol, rows)
+        result[symbol] = rows
+
+    return {
+        "status": "ok",
+        "day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "symbols": selected,
+        "data": result,
+    }
+
+
+@app.get("/api/admin/coin-list/daily")
+async def get_daily_coin_data(request: Request, day: str | None = None) -> dict:
+    _require_admin(request)
+    return _load_daily_coin_data(day)
+
+
+@app.get("/api/coin-list")
+async def coin_list() -> dict:
+    selected = _load_selected_symbols()
     return {
         "symbols": selected,
         "count": len(selected),
-        "note": "n8n workflow bu listedeki coinler icin veri ceker.",
     }
+
 
 @app.get("/signals")
 @app.get("/api/signals")
@@ -845,8 +835,8 @@ async def state_monitor(request: Request):
     return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc), "is_admin": _is_admin(request)})
 
 
-@app.get("/n8n-workflow", response_class=HTMLResponse)
-async def n8n_workflow_page(request: Request):
+@app.get("/coin-list", response_class=HTMLResponse)
+async def coin_list_page(request: Request):
     if not _is_admin(request):
         return RedirectResponse(url="/login", status_code=302)
-    return templates.TemplateResponse("n8n_workflow.html", {"request": request, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("coin_list.html", {"request": request, "is_admin": _is_admin(request)})
