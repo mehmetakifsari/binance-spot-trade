@@ -17,4 +17,37 @@
     {% endfor %}
   </tbody>
 </table>
+
+<h3>Coin Listesi Sinyal Analizi (Spec v1)</h3>
+<p>Gün: {{ coin_analysis.day }} | Analiz edilen coin: {{ coin_analysis.count }}</p>
+<table>
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Signal Side</th>
+      <th>Latest Price</th>
+      <th>RSI</th>
+      <th>Bearish</th>
+      <th>Bullish</th>
+      <th>Panic Score</th>
+      <th>Status</th>
+      <th>Reason</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for coin in coin_analysis.analyses %}
+    <tr>
+      <td>{{ coin.symbol }}</td>
+      <td>{{ coin.signal_side }}</td>
+      <td>{{ coin.latest_price }}</td>
+      <td>{{ coin.rsi }}</td>
+      <td>{{ coin.is_bearish }}</td>
+      <td>{{ coin.is_bullish }}</td>
+      <td>{{ coin.panic_score }}</td>
+      <td>{{ coin.status }}</td>
+      <td>{{ coin.reason or '-' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
 {% endblock %}
