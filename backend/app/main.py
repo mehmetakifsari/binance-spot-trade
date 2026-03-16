@@ -79,6 +79,7 @@ SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
 fallback_admin_sessions: set[str] = set()
 fallback_selected_symbols: set[str] = {"BTCUSDT"}
 fallback_daily_coin_data: dict[str, dict[str, Any]] = {}
+fallback_binance_symbols_cache: dict[str, Any] = {"symbols": [], "updated_at": None}
 _mongo_client = None
 
 
@@ -165,6 +166,106 @@ def _daily_coin_data_collection():
     return client[settings.mongodb_auth_db]["daily_coin_data"]
 
 
+
+
+def _binance_symbols_cache_collection():
+    from pymongo import MongoClient
+
+    client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
+    return client[settings.mongodb_auth_db]["binance_symbols_cache"]
+
+
+def _binance_symbols_cache_ttl_seconds() -> int:
+    ttl_minutes = max(1, settings.binance_symbols_cache_ttl_minutes)
+    return ttl_minutes * 60
+
+
+def _load_cached_binance_symbols() -> list[str] | None:
+    now = datetime.now(timezone.utc)
+
+    try:
+        collection = _binance_symbols_cache_collection()
+        row = collection.find_one({"key": "spot_usdt_symbols"})
+        if row:
+            updated_at = row.get("updated_at")
+            if isinstance(updated_at, datetime):
+                age_seconds = (now - updated_at).total_seconds()
+                if age_seconds <= _binance_symbols_cache_ttl_seconds():
+                    symbols = _normalize_symbols(row.get("symbols", []))
+                    if symbols:
+                        return symbols
+    except Exception as exc:
+        logger.warning("Mongo Binance symbols cache lookup failed, using fallback cache: %s", exc)
+
+    updated_at = fallback_binance_symbols_cache.get("updated_at")
+    symbols = _normalize_symbols(fallback_binance_symbols_cache.get("symbols", []))
+    if isinstance(updated_at, datetime) and symbols:
+        age_seconds = (now - updated_at).total_seconds()
+        if age_seconds <= _binance_symbols_cache_ttl_seconds():
+            return symbols
+
+    return None
+
+
+def _save_cached_binance_symbols(symbols: list[str]) -> list[str]:
+    normalized = _normalize_symbols(symbols)
+    if not normalized:
+        return []
+
+    now = datetime.now(timezone.utc)
+    fallback_binance_symbols_cache["symbols"] = normalized
+    fallback_binance_symbols_cache["updated_at"] = now
+
+    try:
+        collection = _binance_symbols_cache_collection()
+        collection.update_one(
+            {"key": "spot_usdt_symbols"},
+            {
+                "$set": {"symbols": normalized, "updated_at": now},
+                "$setOnInsert": {"created_at": now, "key": "spot_usdt_symbols"},
+            },
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("Mongo Binance symbols cache save failed, using fallback cache: %s", exc)
+
+    return normalized
+
+
+def _invalidate_binance_symbols_cache() -> None:
+    fallback_binance_symbols_cache["symbols"] = []
+    fallback_binance_symbols_cache["updated_at"] = None
+
+    try:
+        collection = _binance_symbols_cache_collection()
+        collection.delete_one({"key": "spot_usdt_symbols"})
+    except Exception as exc:
+        logger.warning("Mongo Binance symbols cache invalidation failed: %s", exc)
+
+
+def _filter_selected_symbols_against_available(
+    selected_symbols: list[str], available_symbols: list[str]
+) -> tuple[list[str], list[str]]:
+    available_set = set(_normalize_symbols(available_symbols))
+    valid_selected = [symbol for symbol in _normalize_symbols(selected_symbols) if symbol in available_set]
+    removed_symbols = [symbol for symbol in _normalize_symbols(selected_symbols) if symbol not in available_set]
+    return valid_selected, removed_symbols
+
+
+def _sync_selected_symbols_with_available(available_symbols: list[str]) -> tuple[list[str], list[str]]:
+    current_selected = _load_selected_symbols()
+    valid_selected, removed_symbols = _filter_selected_symbols_against_available(current_selected, available_symbols)
+
+    if removed_symbols:
+        if valid_selected:
+            _save_selected_symbols(valid_selected)
+        else:
+            fallback_selected_symbols.clear()
+            fallback_selected_symbols.add("BTCUSDT")
+            _save_selected_symbols(["BTCUSDT"])
+
+    return valid_selected if valid_selected else _load_selected_symbols(), removed_symbols
+
 def _normalize_symbols(raw_symbols: list[str]) -> list[str]:
     normalized = []
     for symbol in raw_symbols:
@@ -212,7 +313,12 @@ def _save_selected_symbols(symbols: list[str]) -> list[str]:
     return normalized
 
 
-async def _fetch_binance_exchange_symbols() -> list[str]:
+async def _fetch_binance_exchange_symbols(force_refresh: bool = False) -> list[str]:
+    if not force_refresh:
+        cached_symbols = _load_cached_binance_symbols()
+        if cached_symbols:
+            return cached_symbols
+
     url = "https://api.binance.com/api/v3/exchangeInfo"
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.get(url)
@@ -223,7 +329,7 @@ async def _fetch_binance_exchange_symbols() -> list[str]:
         symbol = row.get("symbol", "")
         if row.get("status") == "TRADING" and row.get("quoteAsset") == "USDT" and symbol:
             symbols.append(symbol)
-    return sorted(symbols)
+    return _save_cached_binance_symbols(sorted(symbols))
 
 
 async def _fetch_symbol_klines(symbol: str, interval: str = "15m", limit: int = 100) -> list[list[Any]]:
@@ -700,9 +806,28 @@ async def signal_collector_status(request: Request) -> dict:
 async def get_coin_list(request: Request) -> dict:
     _require_admin(request)
     available_symbols = await _fetch_binance_exchange_symbols()
+    selected_symbols, removed_symbols = _sync_selected_symbols_with_available(available_symbols)
     return {
         "available_symbols": available_symbols,
-        "selected_symbols": _load_selected_symbols(),
+        "selected_symbols": selected_symbols,
+        "removed_symbols": removed_symbols,
+    }
+
+
+
+
+@app.post("/api/admin/coin-list/sync")
+async def sync_coin_list(request: Request) -> dict:
+    _require_admin(request)
+    _invalidate_binance_symbols_cache()
+    available_symbols = await _fetch_binance_exchange_symbols(force_refresh=True)
+    selected_symbols, removed_symbols = _sync_selected_symbols_with_available(available_symbols)
+
+    return {
+        "status": "ok",
+        "available_symbols": available_symbols,
+        "selected_symbols": selected_symbols,
+        "removed_symbols": removed_symbols,
     }
 
 

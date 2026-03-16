@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     mongodb_auth_db: str = "visutrade_auth"
     mongodb_auth_collection: str = "admin_users"
     mongodb_server_selection_timeout_ms: int = 300
+    binance_symbols_cache_ttl_minutes: int = 720
 
     @model_validator(mode="after")
     def apply_environment_defaults(self) -> "Settings":
