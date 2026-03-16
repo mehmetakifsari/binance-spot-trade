@@ -77,6 +77,20 @@ SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
 fallback_admin_sessions: set[str] = set()
 DEFAULT_N8N_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
 fallback_n8n_selected_symbols: set[str] = {"BTCUSDT"}
+_mongo_client = None
+
+
+def _get_mongo_client():
+    global _mongo_client
+    if _mongo_client is None:
+        from pymongo import MongoClient
+
+        _mongo_client = MongoClient(
+            settings.mongodb_uri,
+            serverSelectionTimeoutMS=settings.mongodb_server_selection_timeout_ms,
+            connect=False,
+        )
+    return _mongo_client
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> str:
@@ -122,6 +136,17 @@ def _parse_session_cookie(raw_cookie: str) -> str | None:
 def _mongo_collection():
     client = _get_mongo_client()
     return client[settings.mongodb_auth_db][settings.mongodb_auth_collection]
+
+
+def _resolve_admin_status(request: Request) -> bool:
+    """Evaluate admin session once per request and cache on request.state."""
+    cached = getattr(request.state, "is_admin", None)
+    if cached is not None:
+        return cached
+
+    status = _is_admin(request)
+    request.state.is_admin = status
+    return status
 
 
 def _mongo_settings_collection():
