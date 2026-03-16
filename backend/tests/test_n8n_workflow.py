@@ -41,7 +41,9 @@ def test_update_n8n_coin_list(monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["workflow_payload"]["symbols"] == ["BTCUSDT"]
+    assert data["workflow_payload"]["name"] == "VisuTrade_Final_v2"
+    fetch_binance_node = next(node for node in data["workflow_payload"]["nodes"] if node["name"] == "Fetch Binance")
+    assert "symbol=BTCUSDT" in fetch_binance_node["parameters"]["url"]
 
 
 def test_public_n8n_coin_list(monkeypatch):

@@ -203,6 +203,103 @@ def _save_n8n_selected_symbols(symbols: list[str]) -> list[str]:
     return normalized
 
 
+def _build_n8n_cron_workflow(symbol: str) -> dict[str, Any]:
+    normalized_symbol = symbol.strip().upper()
+    return {
+        "name": "VisuTrade_Final_v2",
+        "nodes": [
+            {
+                "parameters": {"rule": {"interval": [{"field": "minutes", "minutesInterval": 1}]}},
+                "id": "Schedule_Trigger",
+                "name": "Schedule Trigger",
+                "type": "n8n-nodes-base.scheduleTrigger",
+                "typeVersion": 1.2,
+                "position": [200, 300],
+            },
+            {
+                "parameters": {
+                    "url": f"https://api.binance.com/api/v3/klines?symbol={normalized_symbol}&interval=15m&limit=100",
+                    "options": {},
+                },
+                "id": "Fetch_Binance",
+                "name": "Fetch Binance",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [420, 300],
+            },
+            {
+                "parameters": {
+                    "jsCode": (
+                        "const items = $input.all();\n"
+                        "const rows = items[0].json;\n\n"
+                        "if (!rows || !Array.isArray(rows) || rows.length < 20) {\n"
+                        "    throw new Error(\"Binance'den veri alınamadı!\");\n"
+                        "}\n\n"
+                        "const period = 14;\n"
+                        "const closes = rows.map(r => parseFloat(r[4])).filter(v => !isNaN(v));\n\n"
+                        "let gains = 0, losses = 0;\n"
+                        "for (let i = closes.length - period; i < closes.length; i++) {\n"
+                        "    let diff = closes[i] - closes[i - 1];\n"
+                        "    if (diff >= 0) gains += diff;\n"
+                        "    else losses += Math.abs(diff);\n"
+                        "}\n\n"
+                        "let rsi = losses === 0 ? 100 : 100 - (100 / (1 + (gains / losses)));\n"
+                        "let price = closes[closes.length - 1];\n"
+                        "let prev = closes[closes.length - 2];\n"
+                        "let move = ((price - prev) / prev) * 100;\n\n"
+                        "if (isNaN(price) || isNaN(rsi)) {\n"
+                        "    throw new Error(\"Hesaplama hatası: Fiyat veya RSI bulunamadı.\");\n"
+                        "}\n\n"
+                        "return [{\n"
+                        "    json: {\n"
+                        f"        symbol: \"{normalized_symbol}\",\n"
+                        "        price: Number(price.toFixed(2)),\n"
+                        "        rsi: Number(rsi.toFixed(2)),\n"
+                        "        is_bearish: rsi < 35 || move < -0.2,\n"
+                        "        is_bullish: rsi > 65 || move > 0.2,\n"
+                        "        panic_score: move < -1.5 ? Number((Math.abs(move) * 10).toFixed(2)) : 0\n"
+                        "    }\n"
+                        "}];"
+                    )
+                },
+                "id": "Calculate_Logic",
+                "name": "Calculate Logic",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [640, 300],
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "https://api-trade.visupanel.com/api/signals",
+                    "sendBody": True,
+                    "bodyParameters": {
+                        "parameters": [
+                            {"name": "symbol", "value": "={{$json.symbol}}"},
+                            {"name": "price", "value": "={{$json.price}}"},
+                            {"name": "rsi", "value": "={{$json.rsi}}"},
+                            {"name": "is_bearish", "value": "={{$json.is_bearish}}"},
+                            {"name": "is_bullish", "value": "={{$json.is_bullish}}"},
+                            {"name": "panic_score", "value": "={{$json.panic_score}}"},
+                        ]
+                    },
+                    "options": {},
+                },
+                "id": "Send_Signal",
+                "name": "Send Signal",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [860, 300],
+            },
+        ],
+        "connections": {
+            "Schedule Trigger": {"main": [[{"node": "Fetch Binance", "type": "main", "index": 0}]]},
+            "Fetch Binance": {"main": [[{"node": "Calculate Logic", "type": "main", "index": 0}]]},
+            "Calculate Logic": {"main": [[{"node": "Send Signal", "type": "main", "index": 0}]]},
+        },
+    }
+
+
 def _sync_admin_hash_mongodb() -> None:
     collection = _mongo_collection()
     existing = collection.find_one({"username": DEFAULT_ADMIN_USERNAME})
@@ -570,11 +667,13 @@ async def get_n8n_coin_list(request: Request) -> dict:
 async def update_n8n_coin_list(request: Request, payload: N8NCoinSelectionPayload) -> dict:
     _require_admin(request)
     selected = _save_n8n_selected_symbols(payload.symbols)
+    primary_symbol = selected[0]
     return {
         "status": "ok",
         "available_symbols": DEFAULT_N8N_SYMBOLS,
         "selected_symbols": selected,
-        "workflow_payload": {"symbols": selected},
+        "workflow_payload": _build_n8n_cron_workflow(primary_symbol),
+        "note": "Bu workflow tek bir coin icin cron tabanli calisir. Coklu coin icin her coin adina ayri workflow olusturun.",
     }
 
 
