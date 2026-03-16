@@ -120,9 +120,7 @@ def _parse_session_cookie(raw_cookie: str) -> str | None:
 
 
 def _mongo_collection():
-    from pymongo import MongoClient
-
-    client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
+    client = _get_mongo_client()
     return client[settings.mongodb_auth_db][settings.mongodb_auth_collection]
 
 
@@ -582,12 +580,12 @@ async def signal_endpoint_help() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": _resolve_admin_status(request)})
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if _is_admin(request):
+    if _resolve_admin_status(request):
         return RedirectResponse(url="/dashboard", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
@@ -642,7 +640,8 @@ async def logout(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -662,7 +661,7 @@ async def dashboard(request: Request):
     realized_pnl = equity - settings.starting_balance_usdt - unrealized_pnl
     context = {
         "request": request,
-        "is_admin": _is_admin(request),
+        "is_admin": is_admin,
         "state": row,
         "start_balance": settings.starting_balance_usdt,
         "equity": equity,
@@ -674,7 +673,8 @@ async def dashboard(request: Request):
 
 @app.get("/trades", response_class=HTMLResponse)
 async def trades_page(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -684,12 +684,13 @@ async def trades_page(request: Request):
         trades = []
     finally:
         db.close()
-    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades, "is_admin": is_admin})
 
 
 @app.get("/reports", response_class=HTMLResponse)
 async def reports_page(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -701,12 +702,13 @@ async def reports_page(request: Request):
         db.close()
     equity = float(latest["equity_usdt"]) if latest else settings.starting_balance_usdt
     summary = format_summary(settings.starting_balance_usdt, equity, equity - settings.starting_balance_usdt, 0.0)
-    return templates.TemplateResponse("reports.html", {"request": request, "summary": summary, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("reports.html", {"request": request, "summary": summary, "is_admin": is_admin})
 
 
 @app.get("/state-monitor", response_class=HTMLResponse)
 async def state_monitor(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
