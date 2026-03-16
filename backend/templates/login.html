@@ -6,20 +6,40 @@
   <title>Admin Login</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
-  <main class="auth-wrap">
-    <section class="auth-card">
-      <h2>Admin Panel Girişi</h2>
-      <p>Dashboard erişimi için giriş yapın.</p>
+<body class="auth-page">
+  <main class="auth-layout">
+    <section class="auth-intro" aria-label="Sistem özeti">
+      <div class="auth-intro-badge">VisuTrade Control Center</div>
+      <h1>Admin Paneli ile tüm trade akışını tek ekrandan yönetin</h1>
+      <p>
+        Sinyal izleme, state kontrolleri, raporlama ve trade operasyonlarını
+        güvenli şekilde yönetmek için admin hesabınızla giriş yapın.
+      </p>
+      <ul class="auth-feature-list">
+        <li>Gerçek zamanlı state ve panic mode görünümü</li>
+        <li>Paper trading performans raporları</li>
+        <li>Tek noktadan güvenli oturum yönetimi</li>
+      </ul>
+    </section>
+
+    <section class="auth-card auth-card-elevated" aria-label="Admin giriş formu">
+      <div class="auth-card-head">
+        <h2>Admin Girişi</h2>
+        <p>Devam etmek için bilgilerinizi girin.</p>
+      </div>
+
       {% if error %}
       <div class="alert-error">{{ error }}</div>
       {% endif %}
+
       <form method="post" action="/login" class="auth-form">
-        <label>Kullanıcı Adı</label>
-        <input type="text" name="username" required />
-        <label>Şifre</label>
-        <input type="password" name="password" required />
-        <button class="btn" type="submit">Giriş Yap</button>
+        <label for="username">Kullanıcı Adı</label>
+        <input id="username" type="text" name="username" placeholder="admin" autocomplete="username" required />
+
+        <label for="password">Şifre</label>
+        <input id="password" type="password" name="password" placeholder="••••••••" autocomplete="current-password" required />
+
+        <button class="btn btn-auth" type="submit">Giriş Yap</button>
       </form>
     </section>
   </main>
