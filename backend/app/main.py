@@ -75,6 +75,20 @@ DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "Atmaca@53"
 SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
 fallback_admin_sessions: set[str] = set()
+_mongo_client = None
+
+
+def _get_mongo_client():
+    global _mongo_client
+    if _mongo_client is None:
+        from pymongo import MongoClient
+
+        _mongo_client = MongoClient(
+            settings.mongodb_uri,
+            serverSelectionTimeoutMS=settings.mongodb_server_selection_timeout_ms,
+            connect=False,
+        )
+    return _mongo_client
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> str:
@@ -118,10 +132,19 @@ def _parse_session_cookie(raw_cookie: str) -> str | None:
 
 
 def _mongo_collection():
-    from pymongo import MongoClient
-
-    client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
+    client = _get_mongo_client()
     return client[settings.mongodb_auth_db][settings.mongodb_auth_collection]
+
+
+def _resolve_admin_status(request: Request) -> bool:
+    """Evaluate admin session once per request and cache on request.state."""
+    cached = getattr(request.state, "is_admin", None)
+    if cached is not None:
+        return cached
+
+    status = _is_admin(request)
+    request.state.is_admin = status
+    return status
 
 
 def _sync_admin_hash_mongodb() -> None:
@@ -490,12 +513,12 @@ async def signal_endpoint_help() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("index.html", {"request": request, "is_admin": _resolve_admin_status(request)})
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    if _is_admin(request):
+    if _resolve_admin_status(request):
         return RedirectResponse(url="/dashboard", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
@@ -550,7 +573,8 @@ async def logout(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -570,7 +594,7 @@ async def dashboard(request: Request):
     realized_pnl = equity - settings.starting_balance_usdt - unrealized_pnl
     context = {
         "request": request,
-        "is_admin": _is_admin(request),
+        "is_admin": is_admin,
         "state": row,
         "start_balance": settings.starting_balance_usdt,
         "equity": equity,
@@ -582,7 +606,8 @@ async def dashboard(request: Request):
 
 @app.get("/trades", response_class=HTMLResponse)
 async def trades_page(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -592,12 +617,13 @@ async def trades_page(request: Request):
         trades = []
     finally:
         db.close()
-    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades, "is_admin": is_admin})
 
 
 @app.get("/reports", response_class=HTMLResponse)
 async def reports_page(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -609,12 +635,13 @@ async def reports_page(request: Request):
         db.close()
     equity = float(latest["equity_usdt"]) if latest else settings.starting_balance_usdt
     summary = format_summary(settings.starting_balance_usdt, equity, equity - settings.starting_balance_usdt, 0.0)
-    return templates.TemplateResponse("reports.html", {"request": request, "summary": summary, "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("reports.html", {"request": request, "summary": summary, "is_admin": is_admin})
 
 
 @app.get("/state-monitor", response_class=HTMLResponse)
 async def state_monitor(request: Request):
-    if not _is_admin(request):
+    is_admin = _resolve_admin_status(request)
+    if not is_admin:
         return RedirectResponse(url="/login", status_code=302)
 
     db = SessionLocal()
@@ -624,4 +651,4 @@ async def state_monitor(request: Request):
         states = []
     finally:
         db.close()
-    return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc), "is_admin": _is_admin(request)})
+    return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc), "is_admin": is_admin})
