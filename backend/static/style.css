@@ -351,3 +351,34 @@ pre {
     max-width: none;
   }
 }
+
+.n8n-workflow-card {
+  display: grid;
+  gap: 12px;
+  max-width: 620px;
+}
+
+.n8n-coin-form {
+  display: grid;
+  gap: 12px;
+}
+
+.n8n-coin-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.n8n-coin-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #1a1f25;
+}
+
+.n8n-workflow-payload {
+  margin: 0;
+}

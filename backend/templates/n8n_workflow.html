@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>n8n Workflow Coin Listesi</h2>
+<div class="card n8n-workflow-card">
+  <p>İşaretlediğiniz coinler n8n workflow tarafından çekilecek.</p>
+  <form id="n8n-coin-form" class="n8n-coin-form">
+    <div id="n8n-coin-list" class="n8n-coin-list">Yükleniyor...</div>
+    <button type="submit" class="btn">Kaydet</button>
+  </form>
+  <pre id="n8n-workflow-payload" class="n8n-workflow-payload"></pre>
+  <p id="n8n-workflow-message"></p>
+</div>
+
+<script>
+  const form = document.getElementById("n8n-coin-form");
+  const list = document.getElementById("n8n-coin-list");
+  const payload = document.getElementById("n8n-workflow-payload");
+  const message = document.getElementById("n8n-workflow-message");
+
+  async function loadCoins() {
+    const response = await fetch("/api/admin/n8n/coin-list");
+    const data = await response.json();
+    const selected = new Set(data.selected_symbols || []);
+
+    list.innerHTML = "";
+    for (const symbol of data.available_symbols || []) {
+      const id = `coin-${symbol.toLowerCase()}`;
+      const wrapper = document.createElement("label");
+      wrapper.className = "n8n-coin-item";
+      wrapper.setAttribute("for", id);
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = id;
+      input.name = "symbols";
+      input.value = symbol;
+      input.checked = selected.has(symbol);
+
+      const text = document.createElement("span");
+      text.textContent = symbol;
+
+      wrapper.appendChild(input);
+      wrapper.appendChild(text);
+      list.appendChild(wrapper);
+    }
+
+    payload.textContent = JSON.stringify({ symbols: [...selected] }, null, 2);
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const symbols = [...form.querySelectorAll('input[name="symbols"]:checked')].map((el) => el.value);
+
+    const response = await fetch("/api/admin/n8n/coin-list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbols }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      message.textContent = data.detail || "Kaydetme sırasında hata oluştu.";
+      return;
+    }
+
+    payload.textContent = JSON.stringify(data.workflow_payload, null, 2);
+    message.textContent = "Coin listesi güncellendi.";
+  });
+
+  loadCoins().catch(() => {
+    list.textContent = "Coin listesi yüklenemedi.";
+  });
+</script>
+{% endblock %}

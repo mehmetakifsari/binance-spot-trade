@@ -75,6 +75,8 @@ DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "Atmaca@53"
 SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
 fallback_admin_sessions: set[str] = set()
+DEFAULT_N8N_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
+fallback_n8n_selected_symbols: set[str] = {"BTCUSDT"}
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> str:
@@ -122,6 +124,60 @@ def _mongo_collection():
 
     client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
     return client[settings.mongodb_auth_db][settings.mongodb_auth_collection]
+
+
+def _mongo_settings_collection():
+    from pymongo import MongoClient
+
+    client = MongoClient(settings.mongodb_uri, serverSelectionTimeoutMS=2000)
+    return client[settings.mongodb_auth_db]["app_settings"]
+
+
+def _normalize_symbols(raw_symbols: list[str]) -> list[str]:
+    normalized = []
+    for symbol in raw_symbols:
+        parsed = str(symbol).strip().upper()
+        if parsed and parsed in DEFAULT_N8N_SYMBOLS and parsed not in normalized:
+            normalized.append(parsed)
+    return normalized
+
+
+def _load_n8n_selected_symbols() -> list[str]:
+    try:
+        collection = _mongo_settings_collection()
+        row = collection.find_one({"key": "n8n_selected_symbols"})
+        if row:
+            symbols = _normalize_symbols(row.get("symbols", []))
+            if symbols:
+                return symbols
+    except Exception as exc:
+        logger.warning("Mongo n8n selected symbols lookup failed, using fallback store: %s", exc)
+    return sorted(fallback_n8n_selected_symbols)
+
+
+def _save_n8n_selected_symbols(symbols: list[str]) -> list[str]:
+    normalized = _normalize_symbols(symbols)
+    if not normalized:
+        raise HTTPException(status_code=422, detail="En az bir coin seçilmelidir.")
+
+    fallback_n8n_selected_symbols.clear()
+    fallback_n8n_selected_symbols.update(normalized)
+
+    try:
+        collection = _mongo_settings_collection()
+        now = datetime.now(timezone.utc)
+        collection.update_one(
+            {"key": "n8n_selected_symbols"},
+            {
+                "$set": {"symbols": normalized, "updated_at": now},
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("Mongo n8n selected symbols save failed, using fallback store: %s", exc)
+
+    return normalized
 
 
 def _sync_admin_hash_mongodb() -> None:
@@ -222,6 +278,10 @@ class SignalPayload(BaseModel):
     is_bearish: bool = False
     is_bullish: bool = False
     panic_score: float = 0.0
+
+
+class N8NCoinSelectionPayload(BaseModel):
+    symbols: list[str]
 
 
 def _parse_signal_payload(raw_payload: Any) -> SignalPayload:
@@ -472,6 +532,38 @@ async def signal_collector_status(request: Request) -> dict:
     }
 
 
+
+
+@app.get("/api/admin/n8n/coin-list")
+async def get_n8n_coin_list(request: Request) -> dict:
+    _require_admin(request)
+    return {
+        "available_symbols": DEFAULT_N8N_SYMBOLS,
+        "selected_symbols": _load_n8n_selected_symbols(),
+    }
+
+
+@app.post("/api/admin/n8n/coin-list")
+async def update_n8n_coin_list(request: Request, payload: N8NCoinSelectionPayload) -> dict:
+    _require_admin(request)
+    selected = _save_n8n_selected_symbols(payload.symbols)
+    return {
+        "status": "ok",
+        "available_symbols": DEFAULT_N8N_SYMBOLS,
+        "selected_symbols": selected,
+        "workflow_payload": {"symbols": selected},
+    }
+
+
+@app.get("/api/n8n/coin-list")
+async def n8n_coin_list() -> dict:
+    selected = _load_n8n_selected_symbols()
+    return {
+        "symbols": selected,
+        "count": len(selected),
+        "note": "n8n workflow bu listedeki coinler icin veri ceker.",
+    }
+
 @app.get("/signals")
 @app.get("/api/signals")
 async def signal_endpoint_help() -> dict:
@@ -625,3 +717,10 @@ async def state_monitor(request: Request):
     finally:
         db.close()
     return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc), "is_admin": _is_admin(request)})
+
+
+@app.get("/n8n-workflow", response_class=HTMLResponse)
+async def n8n_workflow_page(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("n8n_workflow.html", {"request": request, "is_admin": _is_admin(request)})
