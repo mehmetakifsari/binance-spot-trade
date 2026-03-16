@@ -20,12 +20,12 @@
         <a href="/">Ana Sayfa</a>
         {% if is_admin %}
         <a href="/dashboard">Dashboard</a>
-        {% else %}
-        <a href="/login">Admin Girişi</a>
-        {% endif %}
         <a href="/trades">Trades</a>
         <a href="/reports">Reports</a>
         <a href="/state-monitor">State Monitor</a>
+        {% else %}
+        <a href="/login">Admin Girişi</a>
+        {% endif %}
       </nav>
       {% if is_admin %}
       <form action="/logout" method="post">
