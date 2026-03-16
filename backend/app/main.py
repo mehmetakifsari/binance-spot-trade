@@ -27,7 +27,7 @@ from .paper_trading import BalanceState, execute_buy, execute_sell
 from .reporting import format_summary
 from .state_machine import BotState, RuntimeState, SignalInput, evaluate_signal
 from .telegram import TelegramNotifier
-from .signal_collector import CollectorConfig, SignalCollector
+from .signal_collector import CollectorConfig, SignalCollector, compute_rsi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -266,6 +266,55 @@ def _load_daily_coin_data(day_key: str | None = None) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Mongo daily coin data lookup failed, using fallback store: %s", exc)
     return {"day": target_key, "data": fallback_daily_coin_data.get(target_key, {})}
+
+
+def _build_spec_signal_from_klines(symbol: str, rows: list[list[Any]], period: int = 14) -> dict[str, Any]:
+    closes = [float(row[4]) for row in rows if isinstance(row, list) and len(row) > 4]
+    if not closes:
+        return {
+            "symbol": symbol,
+            "status": "invalid",
+            "reason": "No close price in klines response",
+        }
+
+    latest_price = closes[-1]
+    rsi = compute_rsi(closes, period=period)
+    is_bearish = rsi >= 70
+    is_bullish = rsi <= 30
+    panic_score = 1.0 if rsi >= 80 else 0.0
+
+    if is_bullish:
+        signal_side = "BULLISH"
+    elif is_bearish:
+        signal_side = "BEARISH"
+    else:
+        signal_side = "NEUTRAL"
+
+    return {
+        "symbol": symbol,
+        "status": "ok",
+        "latest_price": latest_price,
+        "rsi": round(rsi, 2),
+        "is_bearish": is_bearish,
+        "is_bullish": is_bullish,
+        "panic_score": panic_score,
+        "signal_side": signal_side,
+    }
+
+
+def _analyze_daily_coin_signals(day_key: str | None = None) -> dict[str, Any]:
+    daily = _load_daily_coin_data(day_key)
+    analyses: list[dict[str, Any]] = []
+
+    for symbol, rows in sorted(daily.get("data", {}).items()):
+        analysis = _build_spec_signal_from_klines(symbol, rows)
+        analyses.append(analysis)
+
+    return {
+        "day": daily.get("day"),
+        "count": len(analyses),
+        "analyses": analyses,
+    }
 
 
 def _sync_admin_hash_mongodb() -> None:
@@ -667,6 +716,12 @@ async def get_daily_coin_data(request: Request, day: str | None = None) -> dict:
     return _load_daily_coin_data(day)
 
 
+@app.get("/api/admin/coin-list/analysis")
+async def get_daily_coin_analysis(request: Request, day: str | None = None) -> dict:
+    _require_admin(request)
+    return _analyze_daily_coin_signals(day)
+
+
 @app.get("/api/coin-list")
 async def coin_list() -> dict:
     selected = _load_selected_symbols()
@@ -832,7 +887,17 @@ async def state_monitor(request: Request):
         states = []
     finally:
         db.close()
-    return templates.TemplateResponse("state_monitor.html", {"request": request, "states": states, "now": datetime.now(timezone.utc), "is_admin": _is_admin(request)})
+    coin_analysis = _analyze_daily_coin_signals()
+    return templates.TemplateResponse(
+        "state_monitor.html",
+        {
+            "request": request,
+            "states": states,
+            "coin_analysis": coin_analysis,
+            "now": datetime.now(timezone.utc),
+            "is_admin": _is_admin(request),
+        },
+    )
 
 
 @app.get("/coin-list", response_class=HTMLResponse)
