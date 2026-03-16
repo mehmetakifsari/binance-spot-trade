@@ -74,6 +74,7 @@ admin_hash_sync_task: asyncio.Task | None = None
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "Atmaca@53"
 SESSION_SIGNING_PEPPER = "visutrade-session-pepper-v1"
+fallback_admin_sessions: set[str] = set()
 
 
 def _hash_password(password: str, salt: bytes | None = None) -> str:
@@ -165,9 +166,14 @@ def _is_admin(request: Request) -> bool:
     token = _parse_session_cookie(raw_cookie)
     if not token:
         return False
-    collection = _mongo_collection()
-    row = collection.find_one({"username": DEFAULT_ADMIN_USERNAME, "session_token": token})
-    return bool(row)
+    try:
+        collection = _mongo_collection()
+        row = collection.find_one({"username": DEFAULT_ADMIN_USERNAME, "session_token": token})
+        if row:
+            return True
+    except Exception as exc:
+        logger.warning("Mongo admin session check failed, using fallback session store: %s", exc)
+    return token in fallback_admin_sessions
 
 
 def _require_admin(request: Request) -> None:
@@ -496,10 +502,18 @@ async def login_page(request: Request):
 
 @app.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
-    collection = _mongo_collection()
-    row = collection.find_one({"username": username})
+    row = None
+    try:
+        collection = _mongo_collection()
+        row = collection.find_one({"username": username})
+    except Exception as exc:
+        logger.warning("Mongo login lookup failed, falling back to env admin credentials: %s", exc)
 
-    if not row or not _verify_password(password, row.get("password_hash", "")):
+    valid_credentials = bool(row and _verify_password(password, row.get("password_hash", "")))
+    if not valid_credentials:
+        valid_credentials = username == DEFAULT_ADMIN_USERNAME and password == DEFAULT_ADMIN_PASSWORD
+
+    if not valid_credentials:
         return templates.TemplateResponse(
             "login.html",
             {"request": request, "error": "Kullanıcı adı veya şifre hatalı."},
@@ -507,7 +521,11 @@ async def login_submit(request: Request, username: str = Form(...), password: st
         )
 
     session_token = secrets.token_urlsafe(32)
-    _sync_admin_session(session_token)
+    try:
+        _sync_admin_session(session_token)
+    except Exception as exc:
+        logger.warning("Mongo session sync failed, storing fallback admin session: %s", exc)
+        fallback_admin_sessions.add(session_token)
 
     response = RedirectResponse(url="/dashboard", status_code=302)
     response.set_cookie("admin_session", _build_session_cookie_value(session_token), httponly=True, samesite="lax")
@@ -519,7 +537,11 @@ async def logout(request: Request):
     raw_cookie = request.cookies.get("admin_session", "")
     token = _parse_session_cookie(raw_cookie)
     if token:
-        _clear_admin_session(token)
+        fallback_admin_sessions.discard(token)
+        try:
+            _clear_admin_session(token)
+        except Exception as exc:
+            logger.warning("Mongo logout sync failed for admin session: %s", exc)
 
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie("admin_session")

@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app import main
 from app.main import _effective_base_url, _is_localhost_url, _parse_signal_payload
@@ -55,3 +56,67 @@ def test_upsert_admin_user_handles_mongo_failures(monkeypatch):
 
     monkeypatch.setattr(main, "_sync_admin_hash_mongodb", fail_sync)
     main._upsert_admin_user()
+
+
+def test_login_fallback_accepts_default_admin_when_mongo_unavailable(monkeypatch):
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/login",
+            "headers": [],
+            "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        },
+        receive=_receive,
+    )
+
+    def fail_mongo():
+        raise RuntimeError("mongo down")
+
+    monkeypatch.setattr(main, "_mongo_collection", fail_mongo)
+    main.fallback_admin_sessions.clear()
+
+    import asyncio
+
+    response = asyncio.run(main.login_submit(request, main.DEFAULT_ADMIN_USERNAME, main.DEFAULT_ADMIN_PASSWORD))
+
+    assert response.status_code == 302
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "admin_session=" in set_cookie
+
+
+def test_is_admin_uses_fallback_session_when_mongo_unavailable(monkeypatch):
+    token = "fallback-token"
+    signed = main._build_session_cookie_value(token)
+    main.fallback_admin_sessions.clear()
+    main.fallback_admin_sessions.add(token)
+
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/dashboard",
+            "headers": [(b"cookie", f"admin_session={signed}".encode("utf-8"))],
+            "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        },
+        receive=_receive,
+    )
+
+    def fail_mongo():
+        raise RuntimeError("mongo down")
+
+    monkeypatch.setattr(main, "_mongo_collection", fail_mongo)
+
+    assert main._is_admin(request)
